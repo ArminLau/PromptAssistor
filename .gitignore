@@ -1,0 +1,162 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+.venv/
+venv/
+ENV/
+env/
+pip-wheel-metadata/
+
+# Node / Frontend
+node_modules/
+.pnpm-store/
+frontend/dist/
+frontend/dist-electron/
+frontend/out/
+frontend/.vite/
+frontend/release/ 
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+.editorconfig
+
+# OS generated
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Project data (generated at runtime)
+backend/data/*
+backend/static/*
+!backend/data/.gitkeep
+*.db
+*.db-journal
+*.db-wal
+
+# User models (large files, manually managed)
+models/*
+!models/README.md
+
+# User uploaded media (test files, temp uploads)
+uploads/
+temp/
+tmp/
+*.tmp
+
+# Electron build output
+frontend/release/
+frontend/node_modules/
+frontend/build/
+frontend/.npm-cache/
+
+# PyInstaller output
+dist-exe/
+build-temp/
+dist-pyinstaller/
+build-pyinstaller/
+
+# Packaging / Installer artifacts
+*.msi
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.snap
+
+# Environment & Secrets (CRITICAL: never commit these)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+*secret*
+backend/data/config.json
+
+# API Keys & Tokens (any file that may contain secrets)
+*_token*
+*_secret*
+*_password*
+
+# Logs
+*.log
+logs/
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage/
+.nyc_output/
+jest-coverage/
+
+# CI / CD
+.github/workflows/*.local.yml
+
+# Python type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Package lock files (keep only the primary ones)
+# pnpm-lock.yaml should be committed, but not package-lock.json or yarn.lock
+package-lock.json
+yarn.lock
+
+# Documentation build
+docs/_build/
+docs/.doctrees/
+site/
+
+# Backup files
+*.bak
+*.backup
+*.orig
+*.old
+*~
+
+# Archives (accidental commits)
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Claude Code traces (session artifacts)
+.claude/plans/
+.claude/traces/
+
+# System / Shell history
+.bash_history
+.zsh_history
+.history

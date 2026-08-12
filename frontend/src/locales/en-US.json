@@ -1,0 +1,57 @@
+{
+  "_lang": "English",
+  "app": { "name": "PromptAssistor" },
+  "nav": {
+    "reverse": "Reverse Engineer",
+    "expand": "Expand Prompt",
+    "batch": "Batch Tagging",
+    "library": "Prompt Library",
+    "skills": "Skill Editor"
+  },
+  "common": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "search": "Search",
+    "loading": "Loading...",
+    "copy": "Copy"
+  },
+  "reverse": {
+    "title": "Prompt Reverse Engineering",
+    "description": "Upload an image or video, and AI will analyze the content to generate the prompt that would create it.",
+    "upload_hint": "Click or drag files to this area to upload",
+    "start": "Start Reverse Engineering"
+  },
+  "expand": {
+    "title": "Prompt Expansion",
+    "description": "Enter a short prompt, and AI will expand it into a detailed, professional prompt following the target model's guidelines.",
+    "input_placeholder": "Enter a short prompt...",
+    "start": "Start Expansion",
+    "mode_label": "Generation Mode",
+    "mode_T2VA": "Text to Video",
+    "mode_I2VA": "Image to Video",
+    "mode_FL2VA": "First-Last Frame to Video",
+    "mode_L2VA": "Last Frame to Video",
+    "mode_Ref2VA": "Full Reference to Video",
+    "style_label": "Visual Style",
+    "style_placeholder": "Auto (AI decides)",
+    "duration_label": "Target Duration",
+    "duration_unit": "seconds",
+    "materials_label": "Reference Materials"
+  },
+  "batch": {
+    "title": "Dataset Batch Tagging",
+    "description": "Upload multiple images or videos in batch. AI will generate tags and prompts for each file.",
+    "start": "Start Batch Tagging"
+  },
+  "library": {
+    "title": "Prompt Library",
+    "description": "Manage saved prompts with search, categorization, and favorites support",
+    "search_placeholder": "Search prompts..."
+  },
+  "skills": {
+    "title": "Skill Editor",
+    "description": "View and customize prompt writing guides for each model"
+  }
+}

@@ -1,0 +1,38 @@
+# PromptAssistor Backend Dependencies
+# Python 3.11+
+
+# Web Framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.18       # File upload support
+
+# Database
+sqlalchemy>=2.0.35
+alembic>=1.14.0
+
+# LLM Providers
+llama-cpp-python>=0.3.6        # Local GGUF models
+openai>=1.60.0                  # OpenAI-compatible API (Deepseek, Kimi, GLM, GPT)
+ollama>=0.4.0                   # Local Ollama client
+httpx>=0.28.0                   # Async HTTP client
+
+# Media Processing
+Pillow>=11.0.0                  # Image processing
+opencv-python>=4.10.0           # Video frame extraction
+moviepy>=2.0.0                  # Video processing
+pydub>=0.25.1                   # Audio processing
+
+# Skill File Parsing
+PyYAML>=6.0                     # YAML frontmatter parsing
+
+# Data Validation
+pydantic>=2.10.0                # Request/response models
+
+# Configuration
+python-dotenv>=1.0.0            # .env file support
+
+# Development
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+httpx>=0.28.0                   # Also used for TestClient
+ruff>=0.8.0                     # Linting + formatting

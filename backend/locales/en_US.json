@@ -1,0 +1,118 @@
+{
+  "_lang": "English",
+  "_lang_native": "English",
+  "app": {
+    "name": "PromptAssistor",
+    "description": "AI Prompt Generation Assistant"
+  },
+  "nav": {
+    "reverse": "Reverse Engineer",
+    "expand": "Expand Prompt",
+    "batch": "Batch Tagging",
+    "library": "Prompt Library",
+    "skills": "Skill Editor",
+    "settings": "Settings"
+  },
+  "common": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "search": "Search",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "no_data": "No Data",
+    "upload": "Upload",
+    "download": "Download",
+    "export": "Export",
+    "import": "Import",
+    "copy": "Copy",
+    "refresh": "Refresh",
+    "close": "Close",
+    "back": "Back"
+  },
+  "model": {
+    "title": "Model Management",
+    "active_provider": "Active Provider",
+    "switch_provider": "Switch Provider",
+    "test_connection": "Test Connection",
+    "local": "Local Model",
+    "online": "Online API",
+    "ollama": "Ollama",
+    "not_available": "Model Not Available"
+  },
+  "reverse": {
+    "title": "Prompt Reverse Engineering",
+    "description": "Upload an image or video, and AI will analyze the content to generate the prompt that would create it.",
+    "upload_hint": "Click or drag files to this area to upload",
+    "upload_desc": "Supports image and video formats",
+    "start": "Start Reverse Engineering",
+    "result": "Generated Result"
+  },
+  "expand": {
+    "title": "Prompt Expansion",
+    "description": "Enter a short prompt, and AI will expand it into a detailed, professional prompt following the target model's guidelines.",
+    "input_placeholder": "Enter a short prompt, e.g., a white cat in a garden...",
+    "style": "Expansion Style",
+    "length": "Target Length",
+    "start": "Start Expansion",
+    "result": "Expanded Result"
+  },
+  "batch": {
+    "title": "Dataset Batch Tagging",
+    "description": "Upload multiple images or videos in batch. AI will generate tags and prompts for each file, with export support for CSV/JSON.",
+    "upload_hint": "Click or drag a folder to this area",
+    "upload_desc": "Supports batch upload of images and videos",
+    "start": "Start Batch Tagging",
+    "progress": "Processing Progress",
+    "result": "Processing Results"
+  },
+  "library": {
+    "title": "Prompt Library",
+    "description": "Manage saved prompts with search, categorization, and favorites support",
+    "search_placeholder": "Search prompts...",
+    "add_manual": "Add Manually",
+    "column": {
+      "title": "Title",
+      "model": "Model",
+      "category": "Category",
+      "tags": "Tags",
+      "source": "Source",
+      "updated": "Updated",
+      "actions": "Actions"
+    }
+  },
+  "skills": {
+    "title": "Skill Editor",
+    "description": "View and customize prompt writing guides for each model",
+    "refresh": "Refresh List",
+    "view": "View",
+    "customize": "Customize",
+    "installed": "Installed Skills",
+    "detail": "Detail",
+    "edit_title": "Customize Skill",
+    "edit_desc_label": "Description",
+    "edit_desc_hint": "Briefly describe your changes and purpose",
+    "edit_content_label": "Skill Content (Markdown)"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "theme": "Theme"
+  },
+  "messages": {
+    "save_success": "Saved successfully",
+    "save_failed": "Failed to save",
+    "delete_confirm": "Confirm deletion?",
+    "delete_success": "Deleted successfully",
+    "delete_failed": "Failed to delete",
+    "load_failed": "Failed to load",
+    "upload_first": "Please upload files first",
+    "input_required": "Please enter content",
+    "generate_success": "Generation completed",
+    "generate_failed": "Generation failed",
+    "request_failed": "Request failed"
+  }
+}
