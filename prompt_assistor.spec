@@ -43,6 +43,15 @@ a = Analysis(
         ('skills', 'skills'),
         # Models README placeholder / 模型目录说明
         ('models/README.md', 'models'),
+        # ─── CUDA Runtime DLLs for local GPU models (Session 10) ─────────
+        # nvidia CUDA runtime (cublas64_13.dll / cublasLt64_13.dll /
+        # cudart64_13.dll / nvblas64_13.dll) → collected into nvidia/cu13/bin/x86_64
+        # / nvidia CUDA 运行时 DLL → 收集到 nvidia/cu13/bin/x86_64
+        ('.venv/Lib/site-packages/nvidia/cu13/bin/x86_64', 'nvidia/cu13/bin/x86_64'),
+        # llama.cpp dynamic backend DLLs (ggml-cuda.dll / ggml-cpu.dll / ggml.dll /
+        # llama.dll / mtmd.dll + nvcudart_hybrid64.dll copied from NVIDIA DriverStore)
+        # / llama.cpp 动态后端 DLL (+ 从 NVIDIA 驱动 DriverStore 复制的 nvcudart_hybrid64.dll)
+        ('.venv/Lib/site-packages/llama_cpp/lib', 'llama_cpp/lib'),
     ],
     hiddenimports=[
         # ─── Web Framework ───────────────────────────────────────
@@ -86,9 +95,16 @@ a = Analysis(
         'ollama',
 
         # ─── LLM Backend (lazy-loaded by LocalProvider) ────────
-        # 'llama_cpp' NOT included as hiddenimport — native DLLs
-        # need special PyInstaller hook for bundling.
-        # LocalProvider handles ImportError gracefully.
+        # llama_cpp Python modules are collected here; their native DLLs are
+        # bundled via the datas entries above (nvidia/cu13 + llama_cpp/lib).
+        # / llama_cpp 的 Python 模块在此收集；其原生 DLL 已通过上方 datas 打包
+        # （nvidia/cu13 + llama_cpp/lib）。
+        'llama_cpp',
+        'llama_cpp.llama',
+        'llama_cpp.llama_cpp',
+        'llama_cpp._internals',
+        'llama_cpp._ggml',
+        'llama_cpp.llama_chat_format',
 
         # ─── Media Processing (auto-collected when installed) ────
         # PIL/Pillow — image processing
@@ -151,8 +167,6 @@ a = Analysis(
         'turtle',
         'lib2to3',
         'test',
-        'llama_cpp',        # Native DLLs break in PyInstaller, lazy-loaded by LocalProvider
-        'llama_cpp_python',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

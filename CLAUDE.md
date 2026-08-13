@@ -228,11 +228,14 @@ rm -rf build-temp/ dist-exe/
 
 # ─── Step 3: 执行 PyInstaller 打包 ──────────────────────────
 # 确保 venv 中已安装所有依赖: pip install -r backend/requirements.txt
-# ⚠️ GPU 版本需先确认 CUDA DLL 已就位（见下方「GPU/CUDA DLL 收集」小节）：
+# ⚠️ GPU 版本需先完成「GPU/CUDA DLL 收集」小节的三个准备步骤：
 #    - nvidia-cublas + nvidia-cuda-runtime 已装进 venv
-#    - prompt_assistor.spec 已配置收集 nvidia/cu13/bin/x86_64/*.dll 与 nvcudart_hybrid64.dll
-pyinstaller prompt_assistor.spec --distpath dist-exe --workpath build-temp --clean
-# 确认: dist-exe/PromptAssistor.exe 已生成（约 25MB）
+#    - nvcudart_hybrid64.dll 已复制进 llama_cpp/lib/
+#    - prompt_assistor.spec 已配置收集 nvidia/cu13/bin/x86_64/*.dll 与 llama_cpp/lib/*.dll
+.venv/Scripts/python.exe -m PyInstaller prompt_assistor.spec --distpath dist-exe --workpath build-temp --clean
+# 确认: dist-exe/PromptAssistor.exe 已生成
+#   - 标准版（在线+Ollama）: 约 25MB
+#   - GPU 完整版（含本地模型）: 约 500MB（含 nvidia-cublas ~383MB）
 
 # ─── Step 4: 复制 models README 到发布目录 ──────────────────
 mkdir -p dist-exe/models && cp models/README.md dist-exe/models/
@@ -255,6 +258,9 @@ curl -o /dev/null -w "%{http_code}" http://127.0.0.1:18720/  # 应返回 200 (�
 - [ ] **Step 5b:** `GET /api/v1/system/models/scan` → 200（非 404）
 - [ ] **Step 5c:** `GET /` → 200（前端页面正常 serve）
 - [ ] **Step 5d:** 关闭 exe 后，双击 exe 能从资源管理器正常启动
+- [ ] **Step 5e（仅 GPU 版）:** 配置本地模型路径 → `PUT /api/v1/models/active?provider_type=local`
+      切换成功（返回 200），且 `nvidia-smi` 显示模型已占用显存（如 ~6.5GB），
+      F2 扩写生成用时秒级（而非 CPU 回退的分钟级）
 
 #### prompt_assistor.spec 关键配置
 
@@ -267,38 +273,96 @@ datas=[
     ('frontend/dist', 'static'),   # 前端构建产物
     ('skills', 'skills'),          # Skill 文件
     ('models/README.md', 'models'), # 模型目录占位
+    # ─── GPU 版追加 / GPU version additions ───
+    ('.venv/Lib/site-packages/nvidia/cu13/bin/x86_64', 'nvidia/cu13/bin/x86_64'),
+    ('.venv/Lib/site-packages/llama_cpp/lib', 'llama_cpp/lib'),
 ]
 
 # 隐藏导入 / Hidden imports (确保所有模块被收集)
 hiddenimports=['fastapi', 'uvicorn', 'sqlalchemy', 'pydantic', 'yaml', 'httpx',
-               'PIL', 'PIL.Image', 'starlette', 'python_multipart', ...]
+               'PIL', 'PIL.Image', 'starlette', 'python_multipart',
+               'llama_cpp', 'llama_cpp.llama', 'llama_cpp.llama_cpp', ...]
+
+# 排除项 / Excludes (GPU 版已移除 llama_cpp，勿再加回)
+excludes=['tkinter', 'turtle', 'lib2to3', 'test']
 ```
 
 #### GPU/CUDA DLL 收集 (Blackwell sm_120) / CUDA DLL Collection
+
+> ✅ **Session 11 已完整验证通过** — 本小节描述的是「打包 GPU 版 exe」的完整流程，
+> 已在 RTX 5060 Ti 上验证：exe 内本地模型可正常走 GPU（显存 6.5GB，生成 ~4.7s）。
 
 **打包 GPU 版 exe 前必须额外收集以下 CUDA 运行时 DLL，否则本地模型无法走 GPU（Session 10 修复项）：**
 
 | DLL | 来源 (venv) | 打包目标目录 |
 |-----|-------------|--------------|
-| `cublas64_13.dll` 等 (`*.dll`) | `.venv/Lib/site-packages/nvidia/cu13/bin/x86_64/` | `nvidia/cu13/bin/x86_64/` |
-| `nvcudart_hybrid64.dll` | NVIDIA 驱动 DriverStore（或 `llama_cpp/lib/`） | `llama_cpp/lib/` |
-| `ggml-cuda.dll` 等 (`llama_cpp/lib/*.dll`) | `.venv/Lib/site-packages/llama_cpp/lib/` | `llama_cpp/lib/` |
+| `cublas64_13.dll` / `cublasLt64_13.dll` / `cudart64_13.dll` / `nvblas64_13.dll` | `.venv/Lib/site-packages/nvidia/cu13/bin/x86_64/` | `nvidia/cu13/bin/x86_64/` |
+| `ggml-cuda.dll` / `ggml-cpu.dll` / `ggml.dll` / `llama.dll` / `mtmd.dll` 等 | `.venv/Lib/site-packages/llama_cpp/lib/` | `llama_cpp/lib/` |
+| `nvcudart_hybrid64.dll` | NVIDIA 驱动 DriverStore → **复制到** `llama_cpp/lib/` | `llama_cpp/lib/` |
 
-```python
-# prompt_assistor.spec 需追加的 datas 收集项 / Additional datas to append in .spec:
-datas += [
-    # nvidia CUDA 运行时 (cublas64_13.dll 等)
-    ('.venv/Lib/site-packages/nvidia/cu13/bin/x86_64', 'nvidia/cu13/bin/x86_64'),
-    # llama.cpp 动态后端 DLL (ggml-cuda.dll / ggml-cpu.dll / ggml.dll / llama.dll ...)
-    ('.venv/Lib/site-packages/llama_cpp/lib', 'llama_cpp/lib'),
-]
-# nvcudart_hybrid64.dll 需从 DriverStore 提取后放入 llama_cpp/lib/ 一并收集
+**GPU 打包三步准备（venv 内） / Three preparation steps for GPU packaging:**
+
+```bash
+# ─── 准备 1: 确认 llama-cpp-python 是 sm_120 CUDA 13.0 轮子 ──────────
+# Confirm llama-cpp-python is the sm_120 CUDA 13.0 wheel (Session 10)
+.venv/Scripts/python.exe -c "import importlib.metadata as m; print(m.version('llama-cpp-python'))"
+# 期望 / Expect: 0.3.20 (dougeeai 的 +cuda13.0.sm100.sm120 构建)
+# 若为官方 cu12 轮子，Blackwell sm_120 会回退 CPU
+
+# ─── 准备 2: 确认 nvidia CUDA 运行时 DLL 已装进 venv ────────────────
+# Confirm nvidia CUDA runtime DLLs are installed in venv (pip packages)
+ls .venv/Lib/site-packages/nvidia/cu13/bin/x86_64/   # 应含 cublas64_13.dll 等
+# 缺失时安装 / Install if missing:
+#   .venv/Scripts/python.exe -m pip install nvidia-cuda-runtime==13.0.96 nvidia-cublas==13.0.2.14
+
+# ─── 准备 3: 把 nvcudart_hybrid64.dll 复制进 llama_cpp/lib ───────────
+# Copy nvcudart_hybrid64.dll into llama_cpp/lib (from NVIDIA driver DriverStore)
+# 先定位 DriverStore 中的文件 / Locate the file in DriverStore first:
+#   find "C:/Windows/System32/DriverStore/FileRepository" -name "nvcudart_hybrid64.dll"
+cp "C:/Windows/System32/DriverStore/FileRepository/nv_dispi.inf_*/nvcudart_hybrid64.dll" \
+   ".venv/Lib/site-packages/llama_cpp/lib/nvcudart_hybrid64.dll"
+# 说明: cuda_dll.py 运行时也会在 DriverStore 查找，但打包进 exe 更彻底、更自包含
+# Note: cuda_dll.py also searches DriverStore at runtime, but bundling is more self-contained
 ```
 
+**`prompt_assistor.spec` 需做的三处改动 / Three spec changes:**
+
+```python
+# ─── 改动 1: datas 收集 CUDA DLL 目录 ────────────────────────────────
+# Append to the `datas=[...]` list:
+datas += [
+    # nvidia CUDA 运行时 (cublas64_13.dll / cudart64_13.dll / nvblas64_13.dll ...)
+    ('.venv/Lib/site-packages/nvidia/cu13/bin/x86_64', 'nvidia/cu13/bin/x86_64'),
+    # llama.cpp 动态后端 DLL (ggml-cuda.dll / ggml-cpu.dll / ggml.dll / llama.dll
+    # + 上一步复制的 nvcudart_hybrid64.dll)
+    ('.venv/Lib/site-packages/llama_cpp/lib', 'llama_cpp/lib'),
+]
+
+# ─── 改动 2: hiddenimports 加入 llama_cpp ────────────────────────────
+# Add to hiddenimports (replaces the old "NOT included" comment block):
+#   'llama_cpp', 'llama_cpp.llama', 'llama_cpp.llama_cpp',
+#   'llama_cpp._internals', 'llama_cpp._ggml', 'llama_cpp.llama_chat_format',
+
+# ─── 改动 3: 从 excludes 移除 llama_cpp ──────────────────────────────
+# Remove 'llama_cpp' and 'llama_cpp_python' from excludes=[...]
+```
+
+**打包结果预期 / Expected result:**
+
+| 指标 | GPU 完整版 | 标准版（在线+Ollama） |
+|------|-----------|---------------------|
+| exe 大小 | **~500MB**（含 nvidia-cublas ~383MB） | ~25MB |
+| 本地 GGUF 模型 | ✅ 支持 GPU 加速 | ❌ 回退报错 |
+| 在线 API / Ollama | ✅ | ✅ |
+
 > **⚠️ 关键约束:** llama-cpp-python 通过 `ctypes.CDLL(winmode=RTLD_GLOBAL)` 加载，
-> 忽略 `os.add_dll_directory()`，只认标准搜索路径（含 `PATH`）。`local_provider.py`
-> 的 `_setup_cuda_dll_search()` 已根据 `IS_FROZEN` 自动切换：打包模式指向 `sys._MEIPASS`
+> 忽略 `os.add_dll_directory()`，只认标准搜索路径（含 `PATH`）。[cuda_dll.py](backend/utils/cuda_dll.py)
+> 的 `setup_cuda_dll_search()` 已根据 `IS_FROZEN` 自动切换：打包模式指向 `sys._MEIPASS`
 > 内收集的 DLL 目录，源码模式指向 `sys.prefix` 下的 `site-packages`。
+>
+> llama-cpp-python 的 `_base_path` = `os.path.dirname(__file__)/lib`，冻结模式下即
+> `sys._MEIPASS/llama_cpp/lib`，并在加载时把该目录前置到 `PATH` —— 因此把 DLL 收集到
+> `llama_cpp/lib/` 目标目录即可被正确加载。
 
 > 说明: 若不打包 GPU 版（仅在线 API / Ollama），可跳过本节；但 exe 内切换本地模型会失败并自动回退。
 
@@ -499,8 +563,8 @@ Base URL: `http://localhost:{PORT}/api/v1`
 ## 当前开发状态
 
 - **当前阶段:** Phase 1 进行中 — 前后端集成、设置页面、打包完成
-- **最后更新:** 2026-08-13 (Session 10: 本地模型 GPU 加速修复 — Blackwell sm_120 CUDA 13.0 wheel + CUDA 运行时 DLL)
-- **下一步任务:** 端到端测试 F1/F2 生成流程（需配置有效的在线API key或可用的本地模型）
+- **最后更新:** 2026-08-13 (Session 11: GPU 版 exe 打包成功 — llama_cpp + CUDA DLL 完整打包进 exe，本地模型 GPU 加速验证通过)
+- **下一步任务:** 端到端测试 F1/F2 生成流程（已具备本地 GPU 模型 + 可用的在线 API）
 
 ### 已完成 (Phase 0 + Phase 1 部分)
 - [x] 技术栈选型 + 产品架构设计
@@ -527,6 +591,7 @@ Base URL: `http://localhost:{PORT}/api/v1`
 - [x] **PyInstaller 自包含架构:** exe 内嵌 Python 运行时 + 全部依赖，双击即用，无需安装
 - [x] **打包流程规范化:** 完整打包流程 + 验证检查清单写入 CLAUDE.md
 - [x] **工作空间持久化:** 修复扁平键检测 + 默认路径显示 + 原生文件夹选择器
+- [x] **GPU 版 exe 打包:** llama_cpp + CUDA DLL 完整打进 exe，本地模型 GPU 加速验证通过（Session 11）
 
 ### ⚠️ 已知问题
 
@@ -535,19 +600,51 @@ Base URL: `http://localhost:{PORT}/api/v1`
 - **影响:** 项目内置的 Skill 需要手动复制到工作空间
 - **修复方向:** 让 SkillManager 同时扫描项目和工作空间的 skills 目录，或自动同步
 
-#### 问题 2: llama-cpp-python 未打包进 exe
+#### 问题 2: llama-cpp-python 未打包进 exe ✅ 已解决 (Session 11)
 - **现象:** 自包含 exe 中切换本地模型失败，提示 "llama-cpp-python is not installed"
 - **原因:** llama-cpp-python 的 native DLL (`llama_cpp/lib/llama.dll`) 需要专门的 PyInstaller hook 才能正确收集
-- **影响:** exe 版本无法使用本地 GGUF 模型（在线 API 和 Ollama 不受影响）
-- **临时方案:** Provider 切换失败时自动回退到下一个可用后端
-- **修复方向:** 编写 PyInstaller hook 收集 llama_cpp 的 DLL 文件，或使用纯 Python 替代方案
-- **Session 10 更新:** 源码/venv 模式下本地模型 GPU 加速已修复（Blackwell sm_120 CUDA 13.0 wheel
-  + nvidia-cublas/cuda-runtime pip 包 + PATH 前置 DLL）。打包 exe 时需额外收集
-  `nvidia/cu13/bin/x86_64/*.dll` 与 `nvcudart_hybrid64.dll`（见 Session 10 日志）。
+- **Session 11 解决:** 无需编写专门 hook —— 只需在 `prompt_assistor.spec` 中：
+  1. 从 `excludes` 移除 `llama_cpp` / `llama_cpp_python`
+  2. 在 `hiddenimports` 加入 `llama_cpp`（及关键子模块）
+  3. 在 `datas` 收集 `llama_cpp/lib` 与 `nvidia/cu13/bin/x86_64`
+  - 关键机理: llama-cpp-python 的 `_base_path` = `os.path.dirname(__file__)/lib`，
+    冻结模式下即 `sys._MEIPASS/llama_cpp/lib`，因此 DLL 收集到该目标目录即可被加载。
+  - 完整步骤见上方「GPU/CUDA DLL 收集」小节（含 `nvcudart_hybrid64.dll` 复制命令）。
+  - **验证:** exe 内加载 Qwen3.5-9B Q4_K_M + mmproj，显存 6.5GB，F2 生成 ~4.7s ✅
 
 ---
 
 ## 会话日志
+
+### 2026-08-13 (Session 11)
+- **GPU 版 exe 打包成功 + 本地模型 GPU 加速验证通过 / GPU exe packaging + local model GPU verified:**
+  - **用户需求:** 按 CLAUDE.md 打包流程重新打包 exe 以供测试，选择「GPU 完整版」——
+    把 llama_cpp + CUDA DLL 一并打进 exe，使 exe 内可跑本地 GGUF 模型（GPU 加速）。
+  - **核心突破:** 解决了 Session 8 遗留的「llama-cpp-python 未打包进 exe」问题，
+    **无需编写专门 PyInstaller hook**。关键机理：llama-cpp-python 的 `_base_path` =
+    `os.path.dirname(__file__)/lib`，冻结模式下即 `sys._MEIPASS/llama_cpp/lib`，
+    并在加载时把该目录前置到 `PATH`。因此只需把 DLL 收集到对应目标目录即可。
+  - **改动 (3 处):**
+    1. 复制 `nvcudart_hybrid64.dll`（NVIDIA 驱动 DriverStore）→ `.venv/.../llama_cpp/lib/`
+    2. `prompt_assistor.spec`：
+       - `excludes` 移除 `llama_cpp` / `llama_cpp_python`
+       - `hiddenimports` 加入 `llama_cpp` + 关键子模块
+       - `datas` 收集 `nvidia/cu13/bin/x86_64` 与 `llama_cpp/lib`
+    3. 前端重新构建（`npx vite build`，14.6s）
+  - **打包结果:** `dist-exe/PromptAssistor.exe` **509MB**（原 25MB → +nvidia-cublas ~383MB + CUDA DLL）
+  - **验证 (5 项全过):**
+    - `GET /health` → 200 ✅
+    - `GET /api/v1/system/models/scan` → 200 ✅
+    - `GET /` → 200（前端 serve）✅
+    - llama_cpp 正常导入（不再报 "not installed"，日志显示 `llama_context` 消息）✅
+    - **GPU 加速确认:** `nvidia-smi` 显示 **6501 MiB 显存占用**（Qwen3.5-9B Q4_K_M 5.6GB
+      + mmproj 918MB 已卸载到 GPU），F2 扩写生成完整 T2VA 提示词仅 **~4.7s** ✅
+  - **附带发现 (与打包无关的既有 bug):** 本地模型无有效 `model_path` 时切换后端报
+    `'NoneType' object has no attribute 'get'` —— 位于 `model_api.py` 的
+    `get_active_provider_info().get("active", {}).get("type", "")`，
+    当 `active` 为 `None` 时 `.get("active", {})` 返回 `None` 而非 `{}`。
+  - **测试后清理:** 已 `taskkill` 关闭测试 exe，并删除 `dist-exe/data/`（运行时 config），
+    exe 回到「全新」状态，双击即可正常启动。
 
 ### 2026-08-13 (Session 10)
 - **本地模型 GPU 加速修复 (Blackwell sm_120 + CUDA 13.0) / Local model GPU acceleration fix:**
