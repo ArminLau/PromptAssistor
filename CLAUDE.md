@@ -291,22 +291,26 @@ excludes=['tkinter', 'turtle', 'lib2to3', 'test']
 
 > ✅ **Session 11 已完整验证通过** — 本小节描述的是「打包 GPU 版 exe」的完整流程，
 > 已在 RTX 5060 Ti 上验证：exe 内本地模型可正常走 GPU（显存 6.5GB，生成 ~4.7s）。
+>
+> ⚠️ **Session 12 更新:** llama-cpp-python 已从 dougeeai 0.3.20 升级到 **JamePeng 0.3.46**
+> （`cu130`，含 `Qwen35ChatHandler`）。打包 GPU 版应使用 0.3.46 wheel，见下方「准备 1」。
 
 **打包 GPU 版 exe 前必须额外收集以下 CUDA 运行时 DLL，否则本地模型无法走 GPU（Session 10 修复项）：**
 
 | DLL | 来源 (venv) | 打包目标目录 |
 |-----|-------------|--------------|
 | `cublas64_13.dll` / `cublasLt64_13.dll` / `cudart64_13.dll` / `nvblas64_13.dll` | `.venv/Lib/site-packages/nvidia/cu13/bin/x86_64/` | `nvidia/cu13/bin/x86_64/` |
-| `ggml-cuda.dll` / `ggml-cpu.dll` / `ggml.dll` / `llama.dll` / `mtmd.dll` 等 | `.venv/Lib/site-packages/llama_cpp/lib/` | `llama_cpp/lib/` |
-| `nvcudart_hybrid64.dll` | NVIDIA 驱动 DriverStore → **复制到** `llama_cpp/lib/` | `llama_cpp/lib/` |
+| `ggml-cuda.dll` / `ggml-cpu-*.dll` (多CPU变体) / `ggml.dll` / `llama.dll` / `mtmd.dll` / `llama-common.dll` 等 | `.venv/Lib/site-packages/llama_cpp/lib/` | `llama_cpp/lib/` |
+| `nvcudart_hybrid64.dll` | 0.3.46 JamePeng wheel **已内置**；旧 dougeeai 需从 DriverStore 复制 | `llama_cpp/lib/` |
 
 **GPU 打包三步准备（venv 内） / Three preparation steps for GPU packaging:**
 
 ```bash
 # ─── 准备 1: 确认 llama-cpp-python 是 sm_120 CUDA 13.0 轮子 ──────────
-# Confirm llama-cpp-python is the sm_120 CUDA 13.0 wheel (Session 10)
+# Confirm llama-cpp-python is the sm_120 CUDA 13.0 wheel (Session 10/12)
 .venv/Scripts/python.exe -c "import importlib.metadata as m; print(m.version('llama-cpp-python'))"
-# 期望 / Expect: 0.3.20 (dougeeai 的 +cuda13.0.sm100.sm120 构建)
+# 期望 / Expect: 0.3.46 (JamePeng 的 cu130 构建，含 Qwen35ChatHandler)
+# 旧 0.3.20 (dougeeai +cuda13.0.sm100.sm120) 缺 Qwen35ChatHandler，Qwen3.5 视觉会失效
 # 若为官方 cu12 轮子，Blackwell sm_120 会回退 CPU
 
 # ─── 准备 2: 确认 nvidia CUDA 运行时 DLL 已装进 venv ────────────────
@@ -315,12 +319,13 @@ ls .venv/Lib/site-packages/nvidia/cu13/bin/x86_64/   # 应含 cublas64_13.dll �
 # 缺失时安装 / Install if missing:
 #   .venv/Scripts/python.exe -m pip install nvidia-cuda-runtime==13.0.96 nvidia-cublas==13.0.2.14
 
-# ─── 准备 3: 把 nvcudart_hybrid64.dll 复制进 llama_cpp/lib ───────────
-# Copy nvcudart_hybrid64.dll into llama_cpp/lib (from NVIDIA driver DriverStore)
-# 先定位 DriverStore 中的文件 / Locate the file in DriverStore first:
+# ─── 准备 3: 确认 nvcudart_hybrid64.dll 已在 llama_cpp/lib ───────────
+# Verify nvcudart_hybrid64.dll is in llama_cpp/lib
+# 0.3.46 JamePeng wheel 已内置该 DLL；旧 dougeeai 0.3.20 才需从 DriverStore 手动复制。
+# 0.3.46 bundles it; only the old dougeeai 0.3.20 needed manual copy from DriverStore:
 #   find "C:/Windows/System32/DriverStore/FileRepository" -name "nvcudart_hybrid64.dll"
-cp "C:/Windows/System32/DriverStore/FileRepository/nv_dispi.inf_*/nvcudart_hybrid64.dll" \
-   ".venv/Lib/site-packages/llama_cpp/lib/nvcudart_hybrid64.dll"
+#   cp "C:/Windows/System32/DriverStore/FileRepository/nv_dispi.inf_*/nvcudart_hybrid64.dll" \
+#      ".venv/Lib/site-packages/llama_cpp/lib/nvcudart_hybrid64.dll"
 # 说明: cuda_dll.py 运行时也会在 DriverStore 查找，但打包进 exe 更彻底、更自包含
 # Note: cuda_dll.py also searches DriverStore at runtime, but bundling is more self-contained
 ```
@@ -342,6 +347,7 @@ datas += [
 # Add to hiddenimports (replaces the old "NOT included" comment block):
 #   'llama_cpp', 'llama_cpp.llama', 'llama_cpp.llama_cpp',
 #   'llama_cpp._internals', 'llama_cpp._ggml', 'llama_cpp.llama_chat_format',
+#   0.3.46 起还需: 'llama_cpp.llama_multimodal' (视觉 handler 已迁到此模块)
 
 # ─── 改动 3: 从 excludes 移除 llama_cpp ──────────────────────────────
 # Remove 'llama_cpp' and 'llama_cpp_python' from excludes=[...]
@@ -456,6 +462,57 @@ class BaseProvider(ABC):
 - `OnlineProvider` — httpx/OpenAI SDK, 支持多厂商API
 - `OllamaProvider` — ollama Python 客户端, 本地Ollama服务
 
+### 多模态视觉 Handler 兼容性 (Multimodal Vision Handler Compatibility)
+
+> ⚠️ **重要 (Session 12 验证):** 本地模型「上传图片后生成结果与图片无关」的根因通常是
+> **视觉 handler 选错**或**图像 token 太少**，而非前端没传图片。排查时优先检查这两点。
+
+**要求 1: llama-cpp-python 需用 JamePeng 0.3.46+（含 Qwen35ChatHandler）**
+
+- Qwen3.5 / Qwen3-VL 视觉需要 `Qwen35ChatHandler` / `Qwen3VLChatHandler`；官方/dougeeai 的
+  0.3.20 **只有 `Qwen25VLChatHandler`**（Qwen2.5-VL 专用），Qwen3.5 用它会导致视觉失效。
+- 使用 JamePeng `cu130` 构建（`llama_cpp_python-0.3.46+cu130-cp312-cp312-win_amd64.whl`，
+  tag `v0.3.46-cu130-win-20260808`），同时保留 Blackwell sm_120 CUDA 13.0 GPU 支持。
+- 0.3.46 起 handler 类从 `llama_chat_format.py` 迁到 `llama_multimodal.py`，但
+  `llama_chat_format` 仍重导出，`getattr(llama_chat_format, name)` 照常可用。
+
+**要求 2: 基础模型架构 → 视觉 handler 映射**（`local_provider.py::_select_vision_handler_cls`）
+
+| `general.architecture` | handler 类 | 模型族 |
+|------------------------|-----------|--------|
+| `qwen35` | `Qwen35ChatHandler` | Qwen3.5 / Qwen3.6 |
+| `qwen3vl` / `qwen3` | `Qwen3VLChatHandler` | Qwen3-VL |
+| `qwen2vl` / `qwen2` | `Qwen25VLChatHandler` | Qwen2.5-VL / Qwen2-VL |
+| `llava` 等 | `Llava15ChatHandler` | LLaVA |
+
+**要求 3 (关键坑): `image_min_tokens=1024` 必须显式传入**
+
+Qwen-VL 默认只分到 ~64 个图像 token，模型「看不见」图片。创建 handler 时必须对 Qwen 系列
+传 `image_min_tokens=1024`（`MTMDChatHandler.__init__` 参数）：
+
+```python
+image_min_tokens = 1024 if "qwen" in arch else -1
+handler = handler_cls(clip_model_path=mmproj, verbose=False, image_min_tokens=image_min_tokens)
+```
+
+> llama.cpp 加载时若出现 `Qwen-VL models require at minimum 1024 image tokens`，即说明
+> `image_min_tokens` 没设对。
+
+**要求 4 (Session 13 坑): `n_ctx` 默认值必须 ≥ 8192（已改为 32768）**
+
+`image_min_tokens=1024` + minimax_h3 大 skill 系统提示词(~14.5KB) + 用户输入，很容易超过
+旧的 `n_ctx=4096` 默认值。Qwen3-VL 使用 M-RoPE(`n_pos_per_embd>1`)，llama.cpp 会禁用
+context shift，超限时直接报错而非自动截断：
+
+```
+Llama.eval: Context Shift is explicitly disabled ... You MUST increase n_ctx (currently 4096)
+```
+
+因此 `config.py::DEFAULT_CONFIG.providers.local.n_ctx` 已从 4096 改为 **32768**（与用户源码
+模式实际配置一致）。相关兜底默认值也同步为 32768：
+`model_manager.py::_create_provider`、`local_provider.py::initialize`、前端
+`SettingsPage.tsx::handleSave`。
+
 ### 数据流
 ```
 [React前端] → HTTP POST /api/v1/reverse
@@ -563,7 +620,7 @@ Base URL: `http://localhost:{PORT}/api/v1`
 ## 当前开发状态
 
 - **当前阶段:** Phase 1 进行中 — 前后端集成、设置页面、打包完成
-- **最后更新:** 2026-08-13 (Session 11: GPU 版 exe 打包成功 — llama_cpp + CUDA DLL 完整打包进 exe，本地模型 GPU 加速验证通过)
+- **最后更新:** 2026-08-15 (Session 12: 本地模型视觉修复 — 升级 llama-cpp-python 0.3.46 + Qwen35ChatHandler + image_min_tokens=1024)
 - **下一步任务:** 端到端测试 F1/F2 生成流程（已具备本地 GPU 模型 + 可用的在线 API）
 
 ### 已完成 (Phase 0 + Phase 1 部分)
@@ -592,6 +649,7 @@ Base URL: `http://localhost:{PORT}/api/v1`
 - [x] **打包流程规范化:** 完整打包流程 + 验证检查清单写入 CLAUDE.md
 - [x] **工作空间持久化:** 修复扁平键检测 + 默认路径显示 + 原生文件夹选择器
 - [x] **GPU 版 exe 打包:** llama_cpp + CUDA DLL 完整打进 exe，本地模型 GPU 加速验证通过（Session 11）
+- [x] **本地模型视觉修复:** llama-cpp-python 0.3.20 → 0.3.46 (JamePeng cu130)，Qwen35ChatHandler + image_min_tokens=1024，图片识别正常（Session 12）
 
 ### ⚠️ 已知问题
 
@@ -615,6 +673,34 @@ Base URL: `http://localhost:{PORT}/api/v1`
 ---
 
 ## 会话日志
+
+### 2026-08-15 (Session 12)
+- **本地模型视觉修复 (Qwen3.5 图片识别) / Local model vision fix:**
+  - **用户需求:** F2 提示词扩写上传图片后，生成的提示词与图片毫无关联；用户确认基础模型
+    GGUF + mmproj 在「提示词大师」中工作正常，怀疑前端未传图片。
+  - **排查结论 (纠正此前的误判):**
+    - 前端**确实在传图片**（ExpandPage → base64 data URL → `/expand`），链路正常。
+    - 基础模型是 **Qwen3.5-9B 视觉语言模型**（`general.architecture = "qwen35"` + 多模态
+      chat template；mmproj `clip.projector_type = "qwen3vl_merger"`），不是纯文本模型。
+    - 真正的根因在本地推理侧：**两个问题叠加**。
+  - **根因 1:** 安装的 `llama-cpp-python 0.3.20`（dougeeai）缺 `Qwen35ChatHandler`，
+    `qwen35` 回退到 `Qwen25VLChatHandler`（Qwen2.5-VL），视觉 token 格式错误 → 固定错误答案。
+  - **根因 2 (关键坑):** 即使换了正确 handler，`image_min_tokens` 默认 -1 导致 Qwen-VL 只分到
+    ~64 个图像 token，模型「看不见」（llama.cpp 提示 `Qwen-VL models require at minimum 1024 image tokens`）。
+  - **修复 (仅动 .venv + 代码，未碰全局环境):**
+    1. `pip install --force-reinstall --no-deps` 升级到 **JamePeng 0.3.46**（`cu130`，
+       wheel `llama_cpp_python-0.3.46+cu130-cp312-cp312-win_amd64.whl`，tag
+       `v0.3.46-cu130-win-20260808`），含 `Qwen35ChatHandler` / `Qwen3VLChatHandler` /
+       `MTMDChatHandler`（迁到 `llama_multimodal.py`）。
+    2. `local_provider.py::_create_vision_handler` — 对 `qwen*` 架构传 `image_min_tokens=1024`。
+    3. `local_provider.py::_select_vision_handler_cls` — 精确映射 qwen35→Qwen35 / qwen3→Qwen3VL /
+       qwen2→Qwen25VL（修掉"qwen2 也被错配 Qwen35"的隐患）。
+  - **验证 (纯色图端到端，走 LocalProvider.generate):** 红→"solid red"、蓝→"solid blue"、
+    绿→"bright green"、白→"white" 全部正确（修复前全是固定错误答案）。
+  - **GPU 确认:** 所有层在 `CUDA0`，`ARCHS = ...1200`（Blackwell sm_120），`BLACKWELL_NATIVE_FP4=1`。
+    注意 0.3.46 中 `llama_supports_gpu_offload()` 返回 False（假阴性，仅 CLAUDE.md 提及，代码未用）。
+  - **文档更新:** 视觉 handler 兼容性映射 + `image_min_tokens` 要求已写入「多模态视觉 Handler
+    兼容性」小节，防止后续再踩坑。
 
 ### 2026-08-13 (Session 11)
 - **GPU 版 exe 打包成功 + 本地模型 GPU 加速验证通过 / GPU exe packaging + local model GPU verified:**

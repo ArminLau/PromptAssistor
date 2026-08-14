@@ -61,6 +61,27 @@ def get_mime_type(file_path: str | Path) -> str:
     return mime_type or "application/octet-stream"
 
 
+def encode_image_to_data_url(image_path: str | Path) -> str:
+    """
+    Encode an image file to a base64 data URL for multimodal API transmission.
+    / 将图片文件编码为 base64 数据URL，用于多模态API传输。
+
+    Args:
+        image_path: Path to the image file / 图片文件路径.
+
+    Returns:
+        Base64 data URL string (e.g., "data:image/png;base64,...").
+        / base64 数据URL字符串（如 "data:image/png;base64,..."）。
+    """
+    import base64
+
+    path = Path(image_path)
+    mime_type = get_mime_type(path)
+    with open(path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("utf-8")
+    return f"data:{mime_type};base64,{encoded}"
+
+
 def collect_files(
     paths: list[str | Path],
     media_types: set[MediaType] | None = None,

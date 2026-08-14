@@ -339,7 +339,7 @@ class ModelManager:
                 mmproj_path=provider_config.get("mmproj_path", ""),
                 model_name=provider_config.get("model_name", "Local Model"),
                 extra_params={
-                    "n_ctx": provider_config.get("n_ctx", 4096),
+                    "n_ctx": provider_config.get("n_ctx", 32768),
                     "n_threads": provider_config.get("n_threads", 8),
                     "gpu_layers": provider_config.get("gpu_layers", -1),
                     "temperature": provider_config.get("temperature", 0.7),

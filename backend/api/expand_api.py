@@ -2,7 +2,11 @@
 F2: Prompt Expansion API routes / 提示词扩写 API 路由。
 """
 
+import base64
 import logging
+import mimetypes
+import tempfile
+from pathlib import Path
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -28,12 +32,48 @@ class ExpandRequest(BaseModel):
     skill_name: str = "minimax_h3"
     short_prompt: str  # user's requirement description / 用户需求描述
     target_duration: int = 5  # target duration in seconds / 目标时长(秒)
-    material_count: int = 0  # number of reference materials / 参考素材数量
     generation_mode: str = "T2VA"  # H3 generation mode / H3生成模式
     visual_style: str = ""  # visual style keywords / 视觉风格关键词
     expansion_style: str = ""
     target_length: str = ""
     extra_context: str = ""
+    images: list[str] = []  # base64 data URLs of reference images / 参考图片的base64数据URL
+
+
+def _decode_image_data(data: str, temp_dir: Path, index: int) -> str | None:
+    """
+    Decode a base64 data URL (or raw base64) into a temp image file.
+    / 将 base64 数据URL（或纯 base64）解码为临时图片文件。
+
+    Args:
+        data: Base64 data URL (e.g. "data:image/png;base64,...") or raw base64.
+              / base64 数据URL（如 "data:image/png;base64,..."）或纯 base64.
+        temp_dir: Target temp directory / 目标临时目录.
+        index: Image index for filename / 图片序号（用于文件名）.
+
+    Returns:
+        Saved file path, or None if decoding fails / 保存后的路径，解码失败返回 None.
+    """
+    mime = "image/png"
+    b64 = data
+
+    # Parse data URL prefix / 解析 data URL 前缀
+    if data.startswith("data:"):
+        header, _, payload = data.partition(",")
+        if ";" in header:
+            mime = header[len("data:"):].split(";")[0]
+        b64 = payload
+
+    try:
+        raw = base64.b64decode(b64)
+    except Exception as e:
+        logger.warning(f"Invalid base64 for image {index}: {e}")
+        return None
+
+    ext = mimetypes.guess_extension(mime) or ".png"
+    file_path = temp_dir / f"image_{index}{ext}"
+    file_path.write_bytes(raw)
+    return str(file_path)
 
 
 @router.post("")
@@ -47,12 +87,22 @@ async def expand_prompt(request: Request, body: ExpandRequest):
     - Generation mode (T2VA/I2VA/FL2VA/L2VA/Ref2VA) / 生成模式
     - Visual style / 视觉风格
     - Target duration / 目标时长
-    - Reference material references (@Picture N, @Video N, @Audio N)
+    - Reference images (base64) — attached as multimodal input
+      / 参考图片（base64）— 作为多模态输入附上
     - Industry-specific requirements / 行业需求描述
     """
     skill_manager = request.app.state.skill_manager
     model_manager = request.app.state.model_manager
     engine = PromptEngine(skill_manager, model_manager)
+
+    # Decode base64 images into temp files so providers can consume them as paths
+    # / 将 base64 图片解码为临时文件，供 provider 以路径形式消费
+    temp_dir = Path(tempfile.mkdtemp())
+    image_paths: list[str] = []
+    for i, data in enumerate(body.images):
+        path = _decode_image_data(data, temp_dir, i)
+        if path:
+            image_paths.append(path)
 
     # Build context with Minimax-H3 specific info / 构建包含Minimax-H3专用信息的上下文
     extra_parts = []
@@ -77,13 +127,16 @@ async def expand_prompt(request: Request, body: ExpandRequest):
     if body.target_duration:
         extra_parts.append(f"目标视频时长 / Target duration: {body.target_duration} 秒/seconds")
 
-    # 素材 / Materials
-    if body.material_count:
+    # 素材 / Materials — 明确告知模型已附上实际图片及其对应关系
+    if image_paths:
         extra_parts.append(
-            f"参考素材 / Reference materials: 用户已上传 {body.material_count} 个素材，"
-            f"需求描述中的 <Picture N>, <Video N>, <Audio N> 即对应这些素材\n"
-            f"The user has uploaded {body.material_count} reference material(s). "
-            f"<Picture N>, <Video N>, <Audio N> in the description refer to these materials."
+            f"*** 参考图片 / Reference images: 用户已上传 {len(image_paths)} 张图片，"
+            f"并已作为多模态输入附在本消息中 ***\n"
+            f"需求描述中的 <Picture N> 按上传顺序对应这些图片，请务必结合图片的实际画面内容来编写提示词，"
+            f"使生成结果与参考图片强相关。\n"
+            f"The user uploaded {len(image_paths)} reference image(s), attached as multimodal input. "
+            f"<Picture N> in the description map to these images in upload order. "
+            f"Analyze the actual content of the images and keep the output strongly related to them."
         )
 
     extra = "\n\n".join(extra_parts)
@@ -95,6 +148,7 @@ async def expand_prompt(request: Request, body: ExpandRequest):
             feature="expand",
             skill_name=body.skill_name,
             user_text=body.short_prompt,
+            images=image_paths or None,
             extra_context=extra,
         )
         return {

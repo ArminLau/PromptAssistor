@@ -122,7 +122,7 @@ const SettingsPage: React.FC = () => {
         updateData[`providers.${providerType}`] = {
           model_path: values.model_path || '',
           mmproj_path: values.mmproj_path || '',
-          n_ctx: values.n_ctx || 4096,
+          n_ctx: values.n_ctx || 32768,
           n_threads: values.n_threads || 8,
           gpu_layers: values.gpu_layers ?? -1,
           temperature: values.temperature ?? 0.7,

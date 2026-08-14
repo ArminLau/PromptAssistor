@@ -48,9 +48,11 @@ a = Analysis(
         # cudart64_13.dll / nvblas64_13.dll) → collected into nvidia/cu13/bin/x86_64
         # / nvidia CUDA 运行时 DLL → 收集到 nvidia/cu13/bin/x86_64
         ('.venv/Lib/site-packages/nvidia/cu13/bin/x86_64', 'nvidia/cu13/bin/x86_64'),
-        # llama.cpp dynamic backend DLLs (ggml-cuda.dll / ggml-cpu.dll / ggml.dll /
-        # llama.dll / mtmd.dll + nvcudart_hybrid64.dll copied from NVIDIA DriverStore)
-        # / llama.cpp 动态后端 DLL (+ 从 NVIDIA 驱动 DriverStore 复制的 nvcudart_hybrid64.dll)
+        # llama.cpp dynamic backend DLLs (ggml-cuda.dll / ggml-cpu-*.dll / ggml.dll /
+        # llama.dll / mtmd.dll / llama-common.dll). 0.3.46 JamePeng wheel 已内置
+        # nvcudart_hybrid64.dll（旧 dougeeai 0.3.20 才需从 DriverStore 复制）。
+        # / llama.cpp 动态后端 DLL。0.3.46 JamePeng wheel already bundles
+        # nvcudart_hybrid64.dll (old dougeeai 0.3.20 needed manual DriverStore copy).
         ('.venv/Lib/site-packages/llama_cpp/lib', 'llama_cpp/lib'),
     ],
     hiddenimports=[
@@ -105,6 +107,7 @@ a = Analysis(
         'llama_cpp._internals',
         'llama_cpp._ggml',
         'llama_cpp.llama_chat_format',
+        'llama_cpp.llama_multimodal',  # 0.3.46 起视觉 handler 迁到此模块 / vision handlers moved here
 
         # ─── Media Processing (auto-collected when installed) ────
         # PIL/Pillow — image processing

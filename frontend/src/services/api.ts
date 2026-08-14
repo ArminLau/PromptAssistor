@@ -74,12 +74,12 @@ export const expandApi = {
     skill_name: string
     short_prompt: string
     target_duration?: number
-    material_count?: number
     generation_mode?: string
     visual_style?: string
     expansion_style?: string
     target_length?: string
     extra_context?: string
+    images?: string[]  // base64 data URLs / 参考图片的base64数据URL
   }) =>
     api.post<GenerateResult>('/expand', data, { timeout: 180000 }),
 }

@@ -24,6 +24,7 @@ from .base import (
     ProviderNotAvailableError,
 )
 from utils.cuda_dll import setup_cuda_dll_search
+from utils.file_handler import encode_image_to_data_url
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ class LocalProvider(BaseProvider):
         super().__init__()
         self._model = None  # llama_cpp.Llama instance
         self._has_vision = False
+        self._vision_handler = None  # llama_cpp chat handler for vision (mtmd)
 
     @property
     def provider_type(self) -> ProviderType:
@@ -130,7 +132,7 @@ class LocalProvider(BaseProvider):
             # Build kwargs for Llama constructor
             kwargs: dict[str, Any] = {
                 "model_path": str(model_path),
-                "n_ctx": config.extra_params.get("n_ctx", 4096),
+                "n_ctx": config.extra_params.get("n_ctx", 32768),
                 "n_threads": config.extra_params.get("n_threads", 8),
                 "verbose": False,
             }
@@ -140,20 +142,33 @@ class LocalProvider(BaseProvider):
             if gpu_layers != 0:
                 kwargs["n_gpu_layers"] = gpu_layers
 
-            # Multimodal support / 多模态投影器支持
-            if config.mmproj_path:
-                mmproj_path = _resolve_model_path(config.mmproj_path)
-                if mmproj_path.exists():
-                    kwargs["mmproj_path"] = str(mmproj_path)
-                    self._has_vision = True
-                    logger.info(f"Vision support / 视觉支持: {mmproj_path}")
-                else:
-                    logger.warning(f"mmproj file not found / 投影器未找到: {mmproj_path}")
-
             # Load model (this is blocking — in production, run in thread pool)
             self._model = Llama(**kwargs)
             self._set_initialized(True)
             logger.info(f"Local model loaded: {model_path.name} (n_ctx={kwargs['n_ctx']})")
+
+            # 多模态视觉支持检测 / Detect multimodal vision support.
+            # llama-cpp-python 0.3.x 的 mmproj 不再通过 `mmproj_path` 参数传入，
+            # 而是用 `chat_handler=Llava15ChatHandler(clip_model_path=...)` + mtmd API。
+            # `mtmd_support_vision()` 会真实校验模型是否支持视觉输入，
+            # 纯文本模型（如 Qwen3.5）即使配了 mmproj 也会被判为不支持。
+            self._has_vision = False
+            self._vision_handler = None
+            if config.mmproj_path:
+                mmproj_path = _resolve_model_path(config.mmproj_path)
+                if mmproj_path.exists():
+                    self._vision_handler = self._create_vision_handler(str(mmproj_path))
+                    self._has_vision = self._vision_handler is not None
+                    if self._has_vision:
+                        logger.info(f"Vision support / 视觉支持: {mmproj_path}")
+                    else:
+                        logger.warning(
+                            f"mmproj 已配置但模型不支持视觉（纯文本模型）/ "
+                            f"mmproj configured but model does not support vision (text-only): "
+                            f"{mmproj_path}"
+                        )
+                else:
+                    logger.warning(f"mmproj file not found / 投影器未找到: {mmproj_path}")
             return True
 
         except ImportError:
@@ -167,6 +182,107 @@ class LocalProvider(BaseProvider):
                 provider_type=self.provider_type.value,
                 original_error=e,
             )
+
+    def _create_vision_handler(self, mmproj_path: str):
+        """
+        Create a vision chat handler and verify the model actually supports vision.
+        / 创建视觉聊天处理器并校验模型是否真正支持视觉。
+
+        Uses llama-cpp-python 0.3.x mtmd API:
+        / 使用 llama-cpp-python 0.3.x 的 mtmd API：
+        1. Load the mmproj projector via a vision chat handler.
+           / 通过视觉 chat handler 加载 mmproj 投影器。
+        2. `_init_mtmd_context(model)` attaches the projector to the text model.
+           / 将投影器挂接到文本模型。
+        3. `mtmd_support_vision(ctx)` reports whether the model can really see images.
+           / 报告模型是否真的能"看见"图片。
+
+        The handler class is chosen by model architecture because different VL
+        families use different chat formats (Qwen uses ChatML, LLaVA uses
+        USER:/ASSISTANT:).
+        / 根据模型架构选择 handler 类，因为不同 VL 家族使用不同对话格式
+        （Qwen 用 ChatML，LLaVA 用 USER:/ASSISTANT:）。
+
+        Args:
+            mmproj_path: Path to the mmproj projector file / mmproj投影器文件路径.
+
+        Returns:
+            The vision chat handler if vision is supported, else None.
+            / 若支持视觉则返回处理器实例，否则返回 None。
+        """
+        try:
+            # 根据基础模型架构选择正确的视觉 handler 类
+            # Pick the right vision handler class based on the base model architecture
+            arch = (self._model.metadata or {}).get("general.architecture", "").lower()
+            handler_cls = self._select_vision_handler_cls(arch)
+
+            # Qwen-VL 系列需要至少 1024 个图像 token 才能正确理解图像，否则图像会被
+            # 压缩到 ~64 token，模型"看不见"（输出与图片无关）。
+            # Qwen-VL needs >= 1024 image tokens to actually see the image; otherwise
+            # the image collapses to ~64 tokens and the model cannot ground on it.
+            image_min_tokens = 1024 if "qwen" in arch else -1
+
+            handler = handler_cls(
+                clip_model_path=mmproj_path,
+                verbose=False,
+                image_min_tokens=image_min_tokens,
+            )
+            handler._init_mtmd_context(self._model)
+            if handler._mtmd_cpp.mtmd_support_vision(handler.mtmd_ctx):
+                return handler
+            logger.warning(
+                "当前模型不支持视觉输入 / "
+                "Current model does not support image input"
+            )
+            return None
+        except Exception as e:
+            logger.warning(f"Vision init failed / 视觉初始化失败: {e}")
+            return None
+
+    @staticmethod
+    def _select_vision_handler_cls(arch: str):
+        """
+        Select the vision chat handler class for the given model architecture.
+        / 根据模型架构选择视觉 chat handler 类。
+
+        Qwen3.5/Qwen3-VL 需要 `Qwen35ChatHandler`（较新版本才提供），
+        旧版本 llama-cpp-python 只有 `Qwen25VLChatHandler`（Qwen2.5-VL）。
+        这里优先选择最匹配的 handler，缺失时优雅回退。
+        / Qwen3.5/Qwen3-VL needs `Qwen35ChatHandler` (only in newer releases);
+        older llama-cpp-python only ships `Qwen25VLChatHandler` (Qwen2.5-VL).
+        Prefer the most specific handler, falling back gracefully when absent.
+
+        Args:
+            arch: `general.architecture` value from model metadata.
+                  / 模型元数据中的 `general.architecture` 值。
+
+        Returns:
+            A vision chat handler class / 视觉 chat handler 类。
+        """
+        from llama_cpp.llama_chat_format import (
+            Llava15ChatHandler,
+            Qwen25VLChatHandler,
+        )
+        from llama_cpp import llama_chat_format
+
+        def _get(name: str):
+            """按名称获取 handler 类，缺失返回 None / Get handler class by name, or None."""
+            return getattr(llama_chat_format, name, None)
+
+        # 按基础模型架构精确匹配 Qwen 系列视觉 handler。
+        # Qwen3.5 → Qwen35ChatHandler；Qwen3-VL → Qwen3VLChatHandler；
+        # Qwen2/2.5-VL → Qwen25VLChatHandler。
+        # / Match the Qwen vision handler by base model architecture.
+        # Qwen3.5 → Qwen35ChatHandler; Qwen3-VL → Qwen3VLChatHandler;
+        # Qwen2/2.5-VL → Qwen25VLChatHandler.
+        if "qwen35" in arch:
+            return _get("Qwen35ChatHandler") or Qwen25VLChatHandler
+        if "qwen3" in arch:
+            return _get("Qwen3VLChatHandler") or _get("Qwen35ChatHandler") or Qwen25VLChatHandler
+        if "qwen2" in arch or "qwen" in arch:
+            return Qwen25VLChatHandler
+        # LLaVA / 其他 — USER:/ASSISTANT: 对话格式
+        return Llava15ChatHandler
 
     async def generate(
         self,
@@ -193,19 +309,33 @@ class LocalProvider(BaseProvider):
         user_content: str | list[dict] = user_prompt
 
         if images and self._has_vision:
-            # Multimodal format: content is a list of parts
+            # 多模态格式：content 是 image/text 分段列表。
+            # 图片以 base64 data URL 传入（llama-cpp 的 `_load_image` 只认 data: URL，
+            # Windows 的 `file://C:\...` 反斜杠路径会触发 urlopen 失败）。
+            # Multimodal format: content is a list of image/text parts.
+            # Images are base64 data URLs — `_load_image` only handles data: URLs;
+            # Windows `file://C:\...` backslash paths break urlopen.
             content_parts: list[dict] = []
             for img_path in images:
                 content_parts.append({
                     "type": "image_url",
-                    "image_url": {"url": f"file://{img_path}"},
+                    "image_url": {"url": encode_image_to_data_url(img_path)},
                 })
             content_parts.append({"type": "text", "text": user_prompt})
             user_content = content_parts
         elif images and not self._has_vision:
-            logger.warning(
-                "Images provided but no mmproj configured. "
-                "Images will be ignored. Model is text-only."
+            # 明确报错而非静默丢弃图片 —— 静默忽略正是"生成结果与图片毫无关联"的根源。
+            # Raise a clear error instead of silently dropping images — silent
+            # ignoring is exactly why output was unrelated to the uploaded image.
+            raise ProviderError(
+                "当前本地模型不支持图片输入，无法分析上传的图片。\n"
+                "The current local model does not support image input and cannot "
+                "see the uploaded image(s).\n"
+                "原因 / Cause: 该模型是纯文本模型（未配置可用的视觉投影器 mmproj，"
+                "或其架构不支持视觉）。\n"
+                "解决 / Fix: 请切换到视觉语言模型（如 Qwen2.5-VL / Qwen3-VL / LLaVA）"
+                "并配置配套的 mmproj 文件；或改用支持视觉的在线 API。",
+                provider_type=self.provider_type.value,
             )
 
         messages.append({"role": "user", "content": user_content})
@@ -220,12 +350,29 @@ class LocalProvider(BaseProvider):
                 self._config.extra_params.get("top_p", 0.9) if self._config else 0.9,
             )
 
-            response = self._model.create_chat_completion(
-                messages=messages,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=kwargs.get("max_tokens", 4096),
-            )
+            # 有图片时临时挂载视觉 chat handler（仅本次调用生效），
+            # 文本调用仍走模型自带的 chat template handler。
+            # When images are present, temporarily attach the vision chat handler
+            # for this call only; text calls keep the default chat template handler.
+            if images and self._has_vision and self._vision_handler is not None:
+                prev_handler = self._model.chat_handler
+                self._model.chat_handler = self._vision_handler
+                try:
+                    response = self._model.create_chat_completion(
+                        messages=messages,
+                        temperature=temperature,
+                        top_p=top_p,
+                        max_tokens=kwargs.get("max_tokens", 4096),
+                    )
+                finally:
+                    self._model.chat_handler = prev_handler
+            else:
+                response = self._model.create_chat_completion(
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=kwargs.get("max_tokens", 4096),
+                )
 
             choice = response["choices"][0]
             text = choice["message"]["content"]

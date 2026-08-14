@@ -69,6 +69,16 @@ function guessMediaType(file: UploadFile): 'image' | 'video' | 'audio' {
   return 'image'
 }
 
+// 将文件读取为 base64 data URL / Read a file as a base64 data URL
+function fileToDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
 // ─── Thumbnail sub-component / 缩略图子组件 ────────────────────────────
 
 const MaterialThumb: React.FC<{ material: MaterialRef; size?: number }> = ({ material, size = 64 }) => {
@@ -303,13 +313,22 @@ const ExpandPage: React.FC = () => {
     }
     setLoading(true)
     try {
+      // 将参考图片读取为 base64 数据URL，随 JSON 发送，使模型能"看到"图片内容
+      // Read reference images as base64 data URLs and send them with JSON, so the model can "see" them
+      const images: string[] = []
+      for (const m of materials) {
+        if (m.type !== 'image') continue
+        const origin = m.file.originFileObj
+        if (origin) images.push(await fileToDataUrl(origin))
+      }
+
       const response = await expandApi.generate({
         skill_name: 'minimax_h3',
         short_prompt: description,
         target_duration: duration || 5,
-        material_count: materials.length,
         generation_mode: genMode,              // H3模式 / H3 mode
         visual_style: visualStyle || '',        // 视觉风格 / Visual style
+        images,
       })
       if (response.data.success) {
         setResult(response.data.result || '')

@@ -30,7 +30,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         ProviderType.LOCAL.value: {
             "model_path": "",
             "mmproj_path": "",
-            "n_ctx": 4096,
+            # 默认上下文长度 / Default context length.
+            # 必须足够容纳: minimax_h3 skill 系统提示词(~14.5KB) + 视觉图片
+            # (image_min_tokens=1024) + 用户输入。4096 太小会导致 Qwen3-VL 的
+            # M-RoPE(n_pos_per_embd>1) 报 "Context Shift disabled" 错误。
+            # / Must hold: minimax_h3 skill system prompt (~14.5KB) + vision image
+            # (image_min_tokens=1024) + user input. 4096 is too small and triggers
+            # "Context Shift disabled" under Qwen3-VL M-RoPE.
+            "n_ctx": 32768,
             "n_threads": 8,
             "gpu_layers": -1,
             "temperature": 0.7,
