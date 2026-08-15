@@ -99,42 +99,67 @@ class SkillManager:
         self._skills: dict[str, Skill] = {}  # name → Skill
         self._initialized = True
 
+    def _iter_skill_dirs(self) -> list[Path]:
+        """Return skill directories in priority order (workspace first, then built-in).
+
+        返回按优先级排序的技能目录列表：工作空间目录优先，项目内置 skills 目录次之。
+        / Scans both the workspace skills dir and the project default skills dir,
+          so built-in skills remain available even when a workspace is enabled.
+        """
+        dirs: list[Path] = []
+        # 工作空间优先 / workspace first
+        for d in (self._skills_dir, consts.DEFAULT_SKILLS_DIR):
+            try:
+                resolved = d.resolve()
+            except OSError:
+                resolved = d
+            if resolved not in dirs:
+                dirs.append(resolved)
+        return dirs
+
     def discover(self) -> list[Skill]:
         """
-        Scan the skills directory and load all valid skill files.
+        Scan the skills directories and load all valid skill files.
 
         Returns:
             List of successfully loaded Skill objects.
 
         Skill files that fail to parse are logged as warnings and skipped.
         """
-        if not self._skills_dir.exists():
-            logger.warning(f"Skills directory not found: {self._skills_dir}")
-            return []
-
         self._skills.clear()
         loaded: list[Skill] = []
 
-        for skill_dir in self._skills_dir.iterdir():
-            if not skill_dir.is_dir():
-                continue
-            if skill_dir.name.startswith(".") or skill_dir.name.startswith("_"):
-                continue
-
-            skill_file = skill_dir / "skill.md"
-            if not skill_file.exists():
-                logger.debug(f"No skill.md found in {skill_dir}, skipping")
+        for skills_dir in self._iter_skill_dirs():
+            if not skills_dir.exists():
+                logger.warning(f"Skills directory not found: {skills_dir}")
                 continue
 
-            try:
-                skill = self._load_skill_file(skill_file)
-                self._skills[skill.name] = skill
-                loaded.append(skill)
-                logger.info(f"Loaded skill: {skill.display_name} (v{skill.version})")
-            except SkillParseError as e:
-                logger.warning(f"Failed to load skill from {skill_file}: {e}")
+            for skill_dir in skills_dir.iterdir():
+                if not skill_dir.is_dir():
+                    continue
+                if skill_dir.name.startswith(".") or skill_dir.name.startswith("_"):
+                    continue
 
-        logger.info(f"Discovered {len(loaded)} skill(s) from {self._skills_dir}")
+                skill_file = skill_dir / "skill.md"
+                if not skill_file.exists():
+                    logger.debug(f"No skill.md found in {skill_dir}, skipping")
+                    continue
+
+                try:
+                    skill = self._load_skill_file(skill_file)
+                    if skill.name in self._skills:
+                        # 同名 skill 已由更高优先级目录加载，跳过 / name already loaded from higher-priority dir
+                        logger.debug(
+                            f"Skill '{skill.name}' already loaded, skipping duplicate in {skills_dir}"
+                        )
+                        continue
+                    self._skills[skill.name] = skill
+                    loaded.append(skill)
+                    logger.info(f"Loaded skill: {skill.display_name} (v{skill.version})")
+                except SkillParseError as e:
+                    logger.warning(f"Failed to load skill from {skill_file}: {e}")
+
+        logger.info(f"Discovered {len(loaded)} skill(s)")
         return loaded
 
     def reload(self) -> list[Skill]:

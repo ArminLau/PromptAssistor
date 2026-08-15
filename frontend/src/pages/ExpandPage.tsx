@@ -180,6 +180,35 @@ const VISUAL_STYLES: StyleOption[] = [
   { value: 'Cyberpunk, neon lights, rain-soaked streets, high contrast', label: '赛博朋克 / Cyberpunk', enLabel: 'Cyberpunk, neon lights, rain-soaked streets, high contrast', category: '特效 / Effects' },
 ]
 
+// ─── Expansion Types / 扩写类型 ────────────────────────────────────────
+
+interface ExpansionTypeOption {
+  value: string
+  label: string
+  skill: string      // 目标 skill / target skill name
+  imageOnly: boolean // 是否仅支持图片参考素材 / image-only reference materials
+}
+
+const EXPANSION_TYPES: ExpansionTypeOption[] = [
+  { value: 'natural_language', label: '自然语言 / Natural Language', skill: 'natural_prompt', imageOnly: true },
+  { value: 'danbooru', label: 'Danbooru标签 / Danbooru Tags', skill: 'danbooru_prompt', imageOnly: true },
+  { value: 'minimax_h3', label: 'Minimax-H3', skill: 'minimax_h3', imageOnly: false },
+]
+
+// 自然语言模型类型 / Natural language model types
+const NATURAL_MODELS = [
+  { value: 'krea2', label: 'Krea 2' },
+  { value: 'z-image', label: 'Z-Image' },
+  { value: 'flux', label: 'FLUX.1' },
+  { value: 'qwen-image', label: 'Qwen-Image' },
+]
+
+// Danbooru 模型类型 / Danbooru model types
+const DANBOORU_MODELS = [
+  { value: 'anima', label: 'Anima' },
+  { value: 'sdxl', label: 'SDXL' },
+]
+
 // ─── Component / 组件 ───────────────────────────────────────────────────
 
 const ExpandPage: React.FC = () => {
@@ -195,6 +224,9 @@ const ExpandPage: React.FC = () => {
   const [result, setResult] = useState('')
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [expansionType, setExpansionType] = useState<string>('minimax_h3')   // 扩写类型 / expansion type
+  const [modelType, setModelType] = useState<string>('flux')                 // 模型类型 / model type
+  const [targetLength, setTargetLength] = useState<number | null>(500)       // 扩写长度(字符) / target length
 
   // Cleanup preview URLs on unmount / 卸载时清理Object URL
   useEffect(() => {
@@ -228,16 +260,6 @@ const ExpandPage: React.FC = () => {
     setMaterials(newMaterials)
     setUploadFiles(files)
 
-    // Auto-insert reference tags into description / 自动插入引用标签
-    if (newMaterials.length > 0) {
-      const tags = newMaterials.map(m => m.id).join(' ')
-      setDescription(prev => {
-        if (prev.includes(tags)) return prev
-        const line = `素材引用 / Material refs: ${tags}`
-        return prev ? `${prev}\n${line}` : line
-      })
-    }
-
     message.success(`已加载 ${newMaterials.length} 个素材 / ${newMaterials.length} material(s) loaded`)
   }, [])
 
@@ -247,6 +269,19 @@ const ExpandPage: React.FC = () => {
     setMaterials([])
     setUploadFiles([])
     resetTagCounter()
+  }
+
+  // ── Handle expansion type switch / 处理扩写类型切换 ──────────────────
+  const handleTypeChange = (val: string) => {
+    setExpansionType(val)
+    setResult('')
+    const option = EXPANSION_TYPES.find(t => t.value === val)
+    // 切换到仅图片类型时，清空可能残留的视频/音频素材 / clear video/audio materials when switching to image-only type
+    if (option?.imageOnly && materials.some(m => m.type !== 'image')) {
+      handleClearMaterials()
+    }
+    // 重置模型类型为该类型默认项 / reset model type to the type's default
+    setModelType(val === 'danbooru' ? 'anima' : 'flux')
   }
 
   // ── Handle @ mention trigger / 处理@引用触发 ────────────────────────
@@ -322,14 +357,24 @@ const ExpandPage: React.FC = () => {
         if (origin) images.push(await fileToDataUrl(origin))
       }
 
-      const response = await expandApi.generate({
-        skill_name: 'minimax_h3',
+      // 按扩写类型组装请求 payload / Build request payload by expansion type
+      const option = EXPANSION_TYPES.find(t => t.value === expansionType)
+      const payload: Parameters<typeof expandApi.generate>[0] = {
+        expansion_type: expansionType,
+        skill_name: option?.skill,
         short_prompt: description,
-        target_duration: duration || 5,
-        generation_mode: genMode,              // H3模式 / H3 mode
-        visual_style: visualStyle || '',        // 视觉风格 / Visual style
         images,
-      })
+      }
+      if (expansionType === 'minimax_h3') {
+        payload.target_duration = duration || 5
+        payload.generation_mode = genMode
+        payload.visual_style = visualStyle || ''
+      } else {
+        payload.model_type = modelType
+        payload.target_length = targetLength || 500
+      }
+
+      const response = await expandApi.generate(payload)
       if (response.data.success) {
         setResult(response.data.result || '')
         message.success('提示词生成完成 / Prompt generation complete')
@@ -373,13 +418,25 @@ const ExpandPage: React.FC = () => {
     <div>
       <Title level={3}>提示词扩写 / Prompt Expansion</Title>
       <Text type="secondary">
-        Minimax-H3 专用提示词生成器 — 配置参考素材、描述需求，生成专业提示词
-        / Minimax-H3 prompt builder — configure materials, describe needs, generate professional prompts.
+        为不同目标模型生成专业提示词 — 选择扩写类型，配置参考素材与需求，生成专业提示词
+        / Generate professional prompts for different target models — pick an expansion type.
       </Text>
+
+      {/* 扩写类型 / Expansion Type */}
+      <Card title="扩写类型 / Expansion Type" size="small" style={{ marginTop: 16 }}>
+        <Select
+          value={expansionType}
+          onChange={handleTypeChange}
+          style={{ width: '100%' }}
+          options={EXPANSION_TYPES.map(t => ({ value: t.value, label: t.label }))}
+        />
+      </Card>
 
       <Row gutter={16} style={{ marginTop: 16 }}>
         {/* ====== Left Column: Config ====== */}
         <Col xs={24} lg={10}>
+          {expansionType === 'minimax_h3' ? (
+            <>
           {/* (1) Target Duration */}
           <Card title="目标时长 / Target Duration" size="small">
             <Space>
@@ -444,6 +501,34 @@ const ExpandPage: React.FC = () => {
               }}
             />
           </Card>
+          </>
+        ) : (
+          <>
+            {/* 模型类型 / Model Type */}
+            <Card title="模型类型 / Model Type" size="small">
+              <Select
+                value={modelType}
+                onChange={(val) => setModelType(val)}
+                style={{ width: '100%' }}
+                options={(expansionType === 'danbooru' ? DANBOORU_MODELS : NATURAL_MODELS).map(m => ({
+                  value: m.value,
+                  label: m.label,
+                }))}
+              />
+            </Card>
+
+            {/* 扩写长度 / Target Length */}
+            <Card title="扩写长度 / Target Length" size="small" style={{ marginTop: 12 }}>
+              <Space>
+                <InputNumber min={50} max={10000} step={1} precision={0}
+                  value={targetLength} onChange={(val) => setTargetLength(val)}
+                  addonAfter="字符 / chars" style={{ width: 180 }}
+                />
+                <Text type="secondary">50–10000 字符 / characters</Text>
+              </Space>
+            </Card>
+          </>
+        )}
 
           {/* (2) Reference Materials with Thumbnails */}
           <Card
@@ -457,12 +542,14 @@ const ExpandPage: React.FC = () => {
           >
             <Dragger multiple fileList={uploadFiles}
               onChange={({ fileList }) => handleMaterialUpload(fileList)}
-              beforeUpload={() => false} accept="image/*,video/*,audio/*"
+              beforeUpload={() => false} accept={expansionType === 'minimax_h3' ? 'image/*,video/*,audio/*' : 'image/*'}
               showUploadList={false} style={{ padding: '12px 0' }}
             >
               <p className="ant-upload-drag-icon"><InboxOutlined style={{ fontSize: 28 }} /></p>
               <p className="ant-upload-text">点击或拖拽素材 / Click or drag materials</p>
-              <p className="ant-upload-hint">图片/视频/音频 — 按上传顺序自动打标签</p>
+              <p className="ant-upload-hint">
+                {expansionType === 'minimax_h3' ? '图片/视频/音频 — 按上传顺序自动打标签' : '仅图片 — 按上传顺序自动打标签'}
+              </p>
             </Dragger>
 
             {/* ====== Material Thumbnail Grid ====== */}
@@ -536,11 +623,15 @@ const ExpandPage: React.FC = () => {
             <div style={{ position: 'relative' }}>
               <TextArea ref={textAreaRef} rows={6}
                 placeholder={
-                  '描述你的需求，使用 @ 引用参考素材。例如：\n' +
-                  '"使用 <Picture 1> 中的构图风格，结合 <Video 1> 的色彩调性，\n生成一段时长为 ' + (duration || 5) + ' 秒的视频提示词。\n' +
-                  '画面需要表达..."\n\n' +
-                  'Describe your needs. Use @ to reference materials.\n' +
-                  'e.g., "Use the composition from <Picture 1>..."'
+                  expansionType === 'minimax_h3'
+                    ? '描述你的需求，使用 @ 引用参考素材。例如：\n' +
+                      '"使用 <Picture 1> 中的构图风格，结合 <Video 1> 的色彩调性，\n生成一段时长为 ' + (duration || 5) + ' 秒的视频提示词。\n' +
+                      '画面需要表达..."\n\n' +
+                      'Describe your needs. Use @ to reference materials.\n' +
+                      'e.g., "Use the composition from <Picture 1>..."'
+                    : '描述你的需求，使用 @ 引用参考图片。例如：\n' +
+                      '"使用 <Picture 1> 中的构图与风格，生成一张..."\n\n' +
+                      'Describe your needs. Use @ to reference images.'
                 }
                 value={description} onChange={handleInputChange}
                 maxLength={5000} showCount

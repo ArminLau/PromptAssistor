@@ -70,7 +70,11 @@ async def lifespan(app: FastAPI):
             f"{summary['warning_count']} warnings, {summary['error_count']} errors"
         )
 
-    # 3. Initialize managers / 初始化管理器
+    # 3. Initialize database / 初始化数据库
+    from db.database import init_db
+    init_db()
+
+    # 4. Initialize managers / 初始化管理器
     from core.skill_manager import SkillManager
     from core.model_manager import ModelManager
 

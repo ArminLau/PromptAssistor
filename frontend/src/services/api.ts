@@ -71,13 +71,15 @@ export const reverseApi = {
 
 export const expandApi = {
   generate: (data: {
-    skill_name: string
+    expansion_type?: string  // 扩写类型: minimax_h3 | natural_language | danbooru
+    skill_name?: string      // 目标 skill（为空时由 expansion_type 推导）
+    model_type?: string      // 模型类型: krea2 | z-image | flux | qwen-image | anima | sdxl
     short_prompt: string
     target_duration?: number
     generation_mode?: string
     visual_style?: string
     expansion_style?: string
-    target_length?: string
+    target_length?: number   // 扩写长度(字符) / target length in characters
     extra_context?: string
     images?: string[]  // base64 data URLs / 参考图片的base64数据URL
   }) =>

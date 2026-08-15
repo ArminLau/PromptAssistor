@@ -53,6 +53,8 @@ tags: [tag1, tag2, tag3]
 | Skill | 模型 / Model | 类型 / Type | 版本 / Version | 来源 / Source |
 |-------|-------------|-------------|---------------|---------------|
 | [minimax_h3](minimax_h3/skill.md) | MiniMax H3 | 视频生成 / Video Generation | 2.0.0 | [MiniMax-AI/MiniMax-H3](https://github.com/MiniMax-AI/MiniMax-H3) |
+| [natural_prompt](natural_prompt/skill.md) | Krea 2 / Z-Image / FLUX.1 / Qwen-Image | 图像生成 / Image Generation | 1.0.0 | 各模型官方提示词指南 / Official model guides |
+| [danbooru_prompt](danbooru_prompt/skill.md) | Anima / SDXL | 图像生成 / Image Generation | 1.0.0 | 各模型官方提示词指南 / Official model guides |
 
 ### minimax_h3 目录结构 / Directory Structure
 
