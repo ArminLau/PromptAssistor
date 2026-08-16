@@ -16,8 +16,9 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import ConfigManager
@@ -147,10 +148,35 @@ def create_app() -> FastAPI:
         summary = check_summary(results)
         return summary
 
-    # Mount static files (frontend) / 挂载前端静态文件
+    # 挂载前端静态文件与 SPA 回退 / mount frontend static files + SPA fallback
     if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
-        app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
-        logger.info(f"Static files mounted from: {STATIC_DIR}")
+        # 静态资源（Vite 产物位于 assets/ 下，如 JS/CSS）
+        # / mount static assets (Vite output lives under assets/, e.g. JS/CSS)
+        assets_dir = STATIC_DIR / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+        index_file = STATIC_DIR / "index.html"
+
+        # SPA 回退：前端使用 BrowserRouter，路由（如 /reverse）刷新时浏览器会
+        # 请求对应路径，服务端需返回 index.html 让前端路由接管，否则刷新报 404。
+        # / SPA fallback: the frontend uses BrowserRouter; on refresh the browser
+        # requests the client-side route (e.g. /reverse), so return index.html
+        # here and let the router take over — otherwise refresh yields 404.
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str):
+            # 不劫持 API 前缀，让未知 API 端点仍返回 404 JSON
+            # / do not hijack the API prefix — unknown API endpoints still 404
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not Found")
+            # 请求真实存在的静态文件时直接返回（如 favicon、根级文件）
+            # / serve real static files directly (e.g. favicon, root-level files)
+            candidate = STATIC_DIR / full_path
+            if full_path and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(index_file)
+
+        logger.info(f"Static files mounted from: {STATIC_DIR} (SPA fallback enabled)")
     else:
         logger.warning(f"Static dir not found, API-only mode: {STATIC_DIR}")
         @app.get("/")

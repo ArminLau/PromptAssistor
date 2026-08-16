@@ -202,6 +202,9 @@ class ModelManager:
             if provider is None:
                 return {"success": False, "message": f"Unknown provider type: {provider_type}"}
 
+            # 触发懒加载以真实验证后端可用（如本地模型需真正加载）
+            # / trigger lazy-load to actually verify the provider (e.g. load the local model)
+            await provider.ensure_ready()
             is_available = await provider.is_available()
             await provider.shutdown()
 

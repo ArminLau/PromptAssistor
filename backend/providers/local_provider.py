@@ -88,6 +88,8 @@ class LocalProvider(BaseProvider):
     def __init__(self) -> None:
         super().__init__()
         self._model = None  # llama_cpp.Llama instance
+        self._model_path: Path | None = None  # 解析后的模型路径（延迟加载用）/ resolved model path
+        self._mmproj_path: Path | None = None  # 解析后的 mmproj 路径 / resolved mmproj path
         self._has_vision = False
         self._vision_handler = None  # llama_cpp chat handler for vision (mtmd)
 
@@ -97,13 +99,19 @@ class LocalProvider(BaseProvider):
 
     async def initialize(self, config: ProviderConfig) -> bool:
         """
-        Initialize the local GGUF model.
+        Configure the local GGUF model (lightweight — does NOT load the model).
+        / 配置本地 GGUF 模型（轻量 — 不加载模型）。
+
+        模型在首次 generate() 时通过 _ensure_model_loaded() 延迟加载，
+        避免程序启动即占用大量显存/内存。
+        / The model is lazily loaded via _ensure_model_loaded() on first
+        generate() to avoid consuming GPU/RAM at startup.
 
         Args:
             config: Must include model_path. Optionally mmproj_path for vision.
 
         Returns:
-            True if model loaded successfully.
+            True if the model is configured successfully.
         """
         self._config = config
 
@@ -123,54 +131,66 @@ class LocalProvider(BaseProvider):
                 provider_type=self.provider_type.value,
             )
 
+        self._model_path = model_path
+
+        # 解析 mmproj 路径（若配置）/ resolve mmproj path (if configured)
+        self._mmproj_path = None
+        if config.mmproj_path:
+            mmproj_path = _resolve_model_path(config.mmproj_path)
+            if mmproj_path.exists():
+                self._mmproj_path = mmproj_path
+            else:
+                logger.warning(f"mmproj file not found / 投影器未找到: {mmproj_path}")
+
+        # 延迟加载：仅标记为已配置，模型在首次使用时再加载
+        # / lazy load: only mark configured; the model loads on first use
+        self._set_initialized(True)
+        logger.info(
+            f"Local provider configured (lazy load) / 本地后端已配置（延迟加载）: {model_path}"
+        )
+        return True
+
+    def _ensure_model_loaded(self) -> None:
+        """
+        Load the model on first use (lazy), including the vision handler if configured.
+        / 首次使用时加载模型（含视觉 handler，若已配置）。
+
+        Raises:
+            ProviderInitError: 若模型加载失败 / if the model fails to load.
+        """
+        if self._model is not None:
+            return
+
+        if self._model_path is None or not self._model_path.exists():
+            raise ProviderInitError(
+                "Model file not found / 模型文件未找到: "
+                + (str(self._model_path) if self._model_path else "<未配置 / not configured>"),
+                provider_type=self.provider_type.value,
+            )
+
         try:
             # 在 import llama_cpp 之前准备好 CUDA DLL 搜索路径（否则 ggml-cuda.dll 加载失败）
             # Prepare CUDA DLL search path before importing llama_cpp (else ggml-cuda.dll fails)
             setup_cuda_dll_search()
             from llama_cpp import Llama
 
+            extra = self._config.extra_params if self._config else {}
             # Build kwargs for Llama constructor
             kwargs: dict[str, Any] = {
-                "model_path": str(model_path),
-                "n_ctx": config.extra_params.get("n_ctx", 32768),
-                "n_threads": config.extra_params.get("n_threads", 8),
+                "model_path": str(self._model_path),
+                "n_ctx": extra.get("n_ctx", 32768),
+                "n_threads": extra.get("n_threads", 8),
                 "verbose": False,
             }
 
             # GPU acceleration
-            gpu_layers = config.extra_params.get("gpu_layers", 0)
+            gpu_layers = extra.get("gpu_layers", 0)
             if gpu_layers != 0:
                 kwargs["n_gpu_layers"] = gpu_layers
 
             # Load model (this is blocking — in production, run in thread pool)
             self._model = Llama(**kwargs)
-            self._set_initialized(True)
-            logger.info(f"Local model loaded: {model_path.name} (n_ctx={kwargs['n_ctx']})")
-
-            # 多模态视觉支持检测 / Detect multimodal vision support.
-            # llama-cpp-python 0.3.x 的 mmproj 不再通过 `mmproj_path` 参数传入，
-            # 而是用 `chat_handler=Llava15ChatHandler(clip_model_path=...)` + mtmd API。
-            # `mtmd_support_vision()` 会真实校验模型是否支持视觉输入，
-            # 纯文本模型（如 Qwen3.5）即使配了 mmproj 也会被判为不支持。
-            self._has_vision = False
-            self._vision_handler = None
-            if config.mmproj_path:
-                mmproj_path = _resolve_model_path(config.mmproj_path)
-                if mmproj_path.exists():
-                    self._vision_handler = self._create_vision_handler(str(mmproj_path))
-                    self._has_vision = self._vision_handler is not None
-                    if self._has_vision:
-                        logger.info(f"Vision support / 视觉支持: {mmproj_path}")
-                    else:
-                        logger.warning(
-                            f"mmproj 已配置但模型不支持视觉（纯文本模型）/ "
-                            f"mmproj configured but model does not support vision (text-only): "
-                            f"{mmproj_path}"
-                        )
-                else:
-                    logger.warning(f"mmproj file not found / 投影器未找到: {mmproj_path}")
-            return True
-
+            logger.info(f"Local model loaded: {self._model_path.name} (n_ctx={kwargs['n_ctx']})")
         except ImportError:
             raise ProviderInitError(
                 "llama-cpp-python is not installed. Run: pip install llama-cpp-python",
@@ -182,6 +202,28 @@ class LocalProvider(BaseProvider):
                 provider_type=self.provider_type.value,
                 original_error=e,
             )
+
+        # 多模态视觉支持检测 / Detect multimodal vision support.
+        # `mtmd_support_vision()` 会真实校验模型是否支持视觉输入，
+        # 纯文本模型即使配了 mmproj 也会被判为不支持。
+        # / `mtmd_support_vision()` verifies whether the model really supports vision.
+        self._has_vision = False
+        self._vision_handler = None
+        if self._mmproj_path is not None:
+            self._vision_handler = self._create_vision_handler(str(self._mmproj_path))
+            self._has_vision = self._vision_handler is not None
+            if self._has_vision:
+                logger.info(f"Vision support / 视觉支持: {self._mmproj_path}")
+            else:
+                logger.warning(
+                    f"mmproj 已配置但模型不支持视觉（纯文本模型）/ "
+                    f"mmproj configured but model does not support vision (text-only): "
+                    f"{self._mmproj_path}"
+                )
+
+    async def ensure_ready(self) -> None:
+        """懒加载入口：确保模型已加载 / lazy-load entry: ensure the model is loaded."""
+        self._ensure_model_loaded()
 
     def _create_vision_handler(self, mmproj_path: str):
         """
@@ -294,11 +336,14 @@ class LocalProvider(BaseProvider):
         **kwargs: Any,
     ) -> InferenceResult:
         """Generate using the local GGUF model."""
-        if not self._model or not self._initialized:
+        if not self._initialized:
             raise ProviderNotAvailableError(
                 "Local model is not initialized",
                 provider_type=self.provider_type.value,
             )
+
+        # 首次使用时加载模型（懒加载）/ load the model on first use (lazy)
+        self._ensure_model_loaded()
 
         # Build messages in llama-cpp format
         messages = [
@@ -395,8 +440,8 @@ class LocalProvider(BaseProvider):
             )
 
     async def is_available(self) -> bool:
-        """Check if the model is loaded and ready."""
-        return self._initialized and self._model is not None
+        """已配置即视为可用（模型延迟到首次使用时加载）/ configured = available (model loads lazily)."""
+        return self._initialized and self._model_path is not None
 
     async def shutdown(self) -> None:
         """Unload the model and free memory."""

@@ -47,8 +47,8 @@ class PromptEngine:
     async def generate(
         self,
         feature: str,
-        skill_name: str,
-        user_text: str,
+        skill_name: str = "",
+        user_text: str = "",
         images: list[str] | None = None,
         audio: list[str] | None = None,
         video: list[str] | None = None,
@@ -59,8 +59,9 @@ class PromptEngine:
         Generate a prompt using the specified feature, skill, and inputs.
 
         Args:
-            feature: Feature identifier ("reverse", "expand", "batch").
-            skill_name: Name of the skill to use (e.g., "minimax_h3").
+            feature: Feature identifier ("reverse", "reverse_reference", "expand", "batch").
+            skill_name: Name of the skill to use (e.g., "natural_prompt").
+                为空时表示「完全参考」模式，不加载任何 skill / empty means reference-only mode.
             user_text: User's input text.
             images: Optional list of image file paths.
             audio: Optional list of audio file paths.
@@ -76,8 +77,8 @@ class PromptEngine:
             ProviderNotAvailableError: If no provider is available.
             SkillNotFoundError: If the skill is not found.
         """
-        # 1. Load the skill
-        skill_content = self._skill_manager.get_skill_content(skill_name)
+        # 1. Load the skill (空 skill 表示完全参考模式，不加载 / empty skill = reference-only)
+        skill_content = self._skill_manager.get_skill_content(skill_name) if skill_name else ""
 
         # 2. Build system prompt
         system_prompt = self._build_system_prompt(feature, skill_name, skill_content, extra_context)
@@ -165,6 +166,10 @@ class PromptEngine:
         extra_context: str,
     ) -> str:
         """Build the system prompt by combining feature template with skill content."""
+        # 完全参考模式（无 skill）/ reference-only mode (no skill)
+        if feature == "reverse_reference":
+            return REVERSE_REFERENCE_SYSTEM_TEMPLATE.format(extra_context=extra_context)
+
         templates = {
             "reverse": REVERSE_SYSTEM_TEMPLATE,
             "expand": EXPAND_SYSTEM_TEMPLATE,
@@ -187,12 +192,22 @@ class PromptEngine:
         extra_context: str,
     ) -> str:
         """Build the user prompt based on feature type."""
-        templates = {
-            "reverse": "请根据提供的图片/视频，分析并反推出能够生成该内容的专业提示词。",
-            "expand": f"请将以下简短提示词扩展为详细、专业的提示词：\n\n{user_text}",
-            "batch": f"请为以下内容生成标签和提示词：\n\n{user_text}",
-        }
-        base = templates.get(feature, user_text)
+        if feature == "reverse":
+            # 反推（有 skill）：需求描述优先级最高 / requirement description has highest priority
+            base = "请根据提供的图片，分析画面内容，反推出能够生成该内容的专业提示词。"
+            if user_text.strip():
+                base += f"\n\n## 用户反推需求描述（优先级最高，必须严格遵循）\n{user_text}"
+        elif feature == "reverse_reference":
+            # 完全参考模式：需求描述是唯一依据 / requirement description is the sole guide
+            base = "请根据提供的图片，严格遵循以下反推需求描述，反推出符合需求的提示词。"
+            if user_text.strip():
+                base += f"\n\n## 反推需求描述（唯一依据 / 最高优先级）\n{user_text}"
+        elif feature == "expand":
+            base = f"请将以下简短提示词扩展为详细、专业的提示词：\n\n{user_text}"
+        elif feature == "batch":
+            base = f"请为以下内容生成标签和提示词：\n\n{user_text}"
+        else:
+            base = user_text
 
         if extra_context:
             base += f"\n\n补充说明：{extra_context}"
@@ -202,7 +217,7 @@ class PromptEngine:
 
 # ─── System Prompt Templates ───────────────────────────────────────────
 
-REVERSE_SYSTEM_TEMPLATE = """你是一位专业的提示词工程专家，擅长根据图片或视频反推其生成提示词。
+REVERSE_SYSTEM_TEMPLATE = """你是一位专业的提示词工程专家，擅长根据图片反推其生成提示词。
 
 ## 目标模型 Skill 指南
 以下是目标生成模型 **{skill_name}** 的提示词编写指南，你必须严格遵循这些规范来编写提示词：
@@ -210,10 +225,22 @@ REVERSE_SYSTEM_TEMPLATE = """你是一位专业的提示词工程专家，擅长
 {skill_content}
 
 ## 任务
-根据用户提供的图片/视频，分析画面内容，反推出一个能生成类似内容的专业提示词。
+根据用户提供的图片，分析画面内容，反推出一个能生成类似内容的专业提示词。
 
 ## 输出要求
 1. 提示词必须符合上述 Skill 指南中的结构和规范
+2. 详细描述画面中的主体、环境、风格、光影、构图等要素
+3. 若用户提供反推需求描述，其优先级最高，与 Skill 指南冲突时以用户需求为准
+4. 输出格式整洁，仅输出提示词，不要包含解释性文字
+{extra_context}"""
+
+REVERSE_REFERENCE_SYSTEM_TEMPLATE = """你是一位专业的提示词工程专家，擅长根据图片反推其生成提示词。
+
+## 任务
+根据用户提供的图片和反推需求描述，反推出符合需求的提示词。
+
+## 输出要求
+1. 完全遵循用户的反推需求描述（唯一依据，优先级最高），不套用任何特定模型的预设规范
 2. 详细描述画面中的主体、环境、风格、光影、构图等要素
 3. 输出格式整洁，仅输出提示词，不要包含解释性文字
 {extra_context}"""

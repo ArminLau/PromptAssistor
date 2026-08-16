@@ -50,6 +50,21 @@ export interface GenerateResult {
   tokens_used?: number
 }
 
+// 反推逐图结果项 / per-image reverse result item
+export interface ReverseResultItem {
+  filename: string
+  result?: string
+  error?: string
+  model_name?: string
+  tokens_used?: number
+}
+
+export interface ReverseGenerateResult {
+  success: boolean
+  results?: ReverseResultItem[]
+  error?: string
+}
+
 // ─── Model API ────────────────────────────────────────────────────────────
 
 export const modelApi = {
@@ -63,7 +78,7 @@ export const modelApi = {
 
 export const reverseApi = {
   generate: (formData: FormData) =>
-    api.post<GenerateResult>('/reverse', formData, {
+    api.post<ReverseGenerateResult>('/reverse', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 180000,
     }),

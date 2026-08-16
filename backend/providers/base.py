@@ -161,6 +161,17 @@ class BaseProvider(ABC):
         """
         ...
 
+    async def ensure_ready(self) -> None:
+        """
+        Ensure the provider is ready to serve requests.
+
+        懒加载钩子 / Lazy-load hook: 默认无需处理。需要延迟加载重资源的后端
+        （如本地 GGUF 模型）可覆写此方法，在首次被实际使用前加载资源。
+        / No-op by default. Providers that defer heavy loading (e.g. local GGUF
+        models) override this to load resources on demand before first real use.
+        """
+        return None
+
     def _set_initialized(self, value: bool) -> None:
         """Internal helper to set initialization state."""
         self._initialized = value
