@@ -6,14 +6,15 @@ Endpoint for reverse-engineering prompts from images, returning per-image result
 / 从图片反推提示词的端点，逐图返回结果。
 """
 
+import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi.responses import StreamingResponse
 
-from core.engine import PromptEngine
+from core.engine import PromptEngine, build_output_language_hint
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +61,15 @@ def _build_extra_context(
     model_type: str,
     target_length: int,
     reverse_style: str,
+    output_language: str,
 ) -> str:
     """按参数拼装注入 system prompt 的附加上下文 / Build extra context injected into the system prompt."""
     parts: list[str] = []
+
+    # 输出语言 / output language
+    lang_hint = build_output_language_hint(output_language)
+    if lang_hint:
+        parts.append(lang_hint)
 
     # 目标模型（skill 模式下）/ target model section (skill mode)
     if skill_name and model_type:
@@ -100,6 +107,7 @@ async def reverse_prompt(
     model_type: str = Form(default=""),
     target_length: int = Form(default=0),
     reverse_style: str = Form(default=""),
+    output_language: str = Form(default=""),
 ):
     """
     Reverse-engineer a prompt from uploaded images, one result per image.
@@ -130,30 +138,44 @@ async def reverse_prompt(
             file_path.write_bytes(content)
             image_paths.append((img.filename, str(file_path)))
 
-    extra = _build_extra_context(skill_name, model_type, target_length, reverse_style)
+    extra = _build_extra_context(skill_name, model_type, target_length, reverse_style, output_language)
     # 有 skill → 走 skill 反推；无 skill → 走完全参考反推
     # / with skill → skill-based reverse; without skill → reference-only reverse
     feature = "reverse" if skill_name else "reverse_reference"
 
-    # 逐图反推 / reverse each image independently
-    results: list[dict[str, Any]] = []
-    for filename, path in image_paths:
-        try:
-            result = await engine.generate(
-                feature=feature,
-                skill_name=skill_name,
-                user_text=user_text,
-                images=[path],
-                extra_context=extra,
-            )
-            results.append({
-                "filename": filename,
-                "result": result.text,
-                "model_name": result.model_name,
-                "tokens_used": result.tokens_used,
-            })
-        except Exception as e:
-            logger.error(f"Reverse prompt failed for {filename}: {e}")
-            results.append({"filename": filename, "result": "", "error": str(e)})
+    async def stream_results():
+        """逐图反推并即时产出结果 / Reverse each image and yield its result immediately.
 
-    return {"success": True, "results": results}
+        每张图完成即推送一行 NDJSON，前端可增量渲染，无需等全部图片处理完。
+        / Each completed image pushes one NDJSON line, so the frontend renders
+        incrementally without waiting for all images to finish.
+        """
+        for filename, path in image_paths:
+            try:
+                result = await engine.generate(
+                    feature=feature,
+                    skill_name=skill_name,
+                    user_text=user_text,
+                    images=[path],
+                    extra_context=extra,
+                )
+                payload = {
+                    "filename": filename,
+                    "result": result.text,
+                    "model_name": result.model_name,
+                    "tokens_used": result.tokens_used,
+                }
+            except Exception as e:
+                logger.error(f"Reverse prompt failed for {filename}: {e}")
+                payload = {"filename": filename, "result": "", "error": str(e)}
+            # 立即产出该图结果 / yield this image's result as soon as it's ready
+            yield json.dumps(payload, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        stream_results(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # 禁用代理缓冲，确保逐条即时推送 / disable proxy buffering
+        },
+    )

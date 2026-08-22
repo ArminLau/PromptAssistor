@@ -5,6 +5,7 @@ Loads GGUF format models with optional multimodal projector (mmproj)
 for vision-enabled models like Qwen2.5-VL, LLaVA, etc.
 """
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -92,6 +93,13 @@ class LocalProvider(BaseProvider):
         self._mmproj_path: Path | None = None  # 解析后的 mmproj 路径 / resolved mmproj path
         self._has_vision = False
         self._vision_handler = None  # llama_cpp chat handler for vision (mtmd)
+        # 串行化模型加载与推理 / serialize model load + inference
+        # llama-cpp 的 Llama 对象非线程安全；to_thread 让事件循环不再阻塞后，
+        # 并发请求（如快速双击）可能同时进入推理，需加锁串行化。
+        # / The llama-cpp Llama object is not thread-safe; once to_thread frees the
+        # event loop, concurrent requests (e.g. rapid double-click) could enter
+        # inference simultaneously, so the lock serializes them.
+        self._inference_lock = asyncio.Lock()
 
     @property
     def provider_type(self) -> ProviderType:
@@ -343,7 +351,12 @@ class LocalProvider(BaseProvider):
             )
 
         # 首次使用时加载模型（懒加载）/ load the model on first use (lazy)
-        self._ensure_model_loaded()
+        # 模型加载是阻塞操作，放入线程池，避免阻塞事件循环导致流式响应无法即时推送。
+        # 加锁防止并发请求触发重复加载 / the lock prevents concurrent double-load.
+        # / Model loading is blocking; run it in a thread pool so the event loop
+        # stays free and streamed responses can flush promptly.
+        async with self._inference_lock:
+            await asyncio.to_thread(self._ensure_model_loaded)
 
         # Build messages in llama-cpp format
         messages = [
@@ -395,29 +408,18 @@ class LocalProvider(BaseProvider):
                 self._config.extra_params.get("top_p", 0.9) if self._config else 0.9,
             )
 
-            # 有图片时临时挂载视觉 chat handler（仅本次调用生效），
-            # 文本调用仍走模型自带的 chat template handler。
-            # When images are present, temporarily attach the vision chat handler
-            # for this call only; text calls keep the default chat template handler.
-            if images and self._has_vision and self._vision_handler is not None:
-                prev_handler = self._model.chat_handler
-                self._model.chat_handler = self._vision_handler
-                try:
-                    response = self._model.create_chat_completion(
-                        messages=messages,
-                        temperature=temperature,
-                        top_p=top_p,
-                        max_tokens=kwargs.get("max_tokens", 4096),
-                    )
-                finally:
-                    self._model.chat_handler = prev_handler
-            else:
-                response = self._model.create_chat_completion(
-                    messages=messages,
-                    temperature=temperature,
-                    top_p=top_p,
-                    max_tokens=kwargs.get("max_tokens", 4096),
-                )
+            max_tokens = kwargs.get("max_tokens", 4096)
+            # 推理放入线程池执行并加锁串行化，避免并发请求竞态（chat_handler 交换）。
+            # / Inference runs in a thread pool under the lock to avoid concurrent
+            # request races (chat_handler swap).
+            use_vision = bool(images and self._has_vision and self._vision_handler is not None)
+            response = await self._run_completion(
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                use_vision=use_vision,
+            )
 
             choice = response["choices"][0]
             text = choice["message"]["content"]
@@ -437,6 +439,44 @@ class LocalProvider(BaseProvider):
                 f"Local model inference failed: {e}",
                 provider_type=self.provider_type.value,
                 original_error=e,
+            )
+
+    async def _run_completion(
+        self,
+        messages: list[dict],
+        temperature: float,
+        top_p: float,
+        max_tokens: int,
+        use_vision: bool,
+    ) -> dict:
+        """执行一次推理，加锁串行化 / run one inference, serialized by the lock.
+
+        有图片时临时挂载视觉 chat handler（仅本次调用生效），文本调用仍走模型
+        自带的 chat template handler。推理是阻塞操作，放入线程池执行。
+        / With images, temporarily attach the vision chat handler for this call
+        only; text calls keep the default handler. Inference is blocking, so it
+        runs in a thread pool.
+        """
+        async with self._inference_lock:
+            if use_vision:
+                prev_handler = self._model.chat_handler
+                self._model.chat_handler = self._vision_handler
+                try:
+                    return await asyncio.to_thread(
+                        self._model.create_chat_completion,
+                        messages=messages,
+                        temperature=temperature,
+                        top_p=top_p,
+                        max_tokens=max_tokens,
+                    )
+                finally:
+                    self._model.chat_handler = prev_handler
+            return await asyncio.to_thread(
+                self._model.create_chat_completion,
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
             )
 
     async def is_available(self) -> bool:

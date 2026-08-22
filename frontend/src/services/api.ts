@@ -6,7 +6,7 @@
 
 import axios, { AxiosInstance } from 'axios'
 
-const API_BASE_URL = 'http://127.0.0.1:18720/api/v1'
+export const API_BASE_URL = 'http://127.0.0.1:18720/api/v1'
 
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -59,12 +59,6 @@ export interface ReverseResultItem {
   tokens_used?: number
 }
 
-export interface ReverseGenerateResult {
-  success: boolean
-  results?: ReverseResultItem[]
-  error?: string
-}
-
 // ─── Model API ────────────────────────────────────────────────────────────
 
 export const modelApi = {
@@ -77,11 +71,51 @@ export const modelApi = {
 // ─── Feature APIs ─────────────────────────────────────────────────────────
 
 export const reverseApi = {
-  generate: (formData: FormData) =>
-    api.post<ReverseGenerateResult>('/reverse', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 180000,
-    }),
+  /**
+   * 流式反推 / Streaming reverse.
+   *
+   * 后端以 NDJSON 逐图推送结果；每张图完成即调用一次 onResult，
+   * 前端可增量渲染，无需等全部图片反推完成。
+   * / The backend streams per-image NDJSON; onResult fires once per completed
+   * image so the frontend can render incrementally.
+   */
+  generateStream: async (
+    formData: FormData,
+    onResult: (item: ReverseResultItem) => void,
+  ): Promise<void> => {
+    const response = await fetch(`${API_BASE_URL}/reverse`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!response.ok || !response.body) {
+      throw new Error(`Reverse request failed / 反推请求失败: HTTP ${response.status}`)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+
+    const handleLine = (line: string) => {
+      const trimmed = line.trim()
+      if (!trimmed) return
+      try {
+        onResult(JSON.parse(trimmed) as ReverseResultItem)
+      } catch (e) {
+        console.warn('Failed to parse reverse stream line / 解析流式行失败:', trimmed, e)
+      }
+    }
+
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      lines.forEach(handleLine)
+    }
+    // 处理缓冲区中残留的最后一行 / flush the remaining buffered line
+    if (buffer.trim()) handleLine(buffer)
+  },
 }
 
 export const expandApi = {
@@ -95,6 +129,7 @@ export const expandApi = {
     visual_style?: string
     expansion_style?: string
     target_length?: number   // 扩写长度(字符) / target length in characters
+    output_language?: string // 输出语言 ("zh"/"en") / output language
     extra_context?: string
     images?: string[]  // base64 data URLs / 参考图片的base64数据URL
   }) =>

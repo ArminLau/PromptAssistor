@@ -9,10 +9,11 @@
 import React, { useState, useEffect } from 'react'
 import {
   Card, Upload, Button, Input, InputNumber, Typography, message,
-  Row, Col, Select, Spin, Image as AntImage,
+  Row, Col, Select, Spin, Image as AntImage, Space, Tooltip,
 } from 'antd'
 import {
   InboxOutlined, ThunderboltOutlined, CopyOutlined, FileImageOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons'
 import type { UploadFile } from 'antd'
 import { reverseApi } from '../services/api'
@@ -91,12 +92,19 @@ function parseTarget(val: string): { skill: string; modelType: string } {
   return { skill: val.slice(0, idx), modelType: val.slice(idx + 1) }
 }
 
+// 输出语言选项 / output language options
+const OUTPUT_LANGUAGES = [
+  { value: 'zh', label: '中文 / Chinese' },
+  { value: 'en', label: '英文 / English' },
+]
+
 const ReversePage: React.FC = () => {
   const [fileList, setFileList] = useState<UploadFile[]>([])
   const [requirements, setRequirements] = useState('')
   const [reverseTarget, setReverseTarget] = useState('natural_prompt:krea2')
   const [targetLength, setTargetLength] = useState<number | null>(500)
   const [reverseStyle, setReverseStyle] = useState('five_point')
+  const [outputLanguage, setOutputLanguage] = useState('zh')
   const [results, setResults] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [previews, setPreviews] = useState<Record<string, string>>({})
@@ -122,6 +130,18 @@ const ReversePage: React.FC = () => {
     setResults({})
   }
 
+  // 删除单张图片 / Remove a single image
+  // 预览 objectURL 由 fileList 变化触发的 useEffect 统一回收，这里只更新状态。
+  // / The preview object URL is recycled by the fileList-driven useEffect; here we just update state.
+  const handleRemoveFile = (uid: string) => {
+    setFileList((prev) => prev.filter((f) => f.uid !== uid))
+    setResults((prev) => {
+      const next = { ...prev }
+      delete next[uid]
+      return next
+    })
+  }
+
   const handleGenerate = async () => {
     if (fileList.length === 0) {
       message.warning('请先上传图片 / Please upload images first')
@@ -129,6 +149,7 @@ const ReversePage: React.FC = () => {
     }
 
     setLoading(true)
+    setResults({})
     try {
       const { skill, modelType } = parseTarget(reverseTarget)
       const formData = new FormData()
@@ -137,28 +158,45 @@ const ReversePage: React.FC = () => {
       if (requirements.trim()) formData.append('user_text', requirements.trim())
       if (targetLength) formData.append('target_length', String(targetLength))
       if (reverseStyle) formData.append('reverse_style', reverseStyle)
+      if (outputLanguage) formData.append('output_language', outputLanguage)
 
+      // 按上传顺序记录 uid，后端按同一顺序逐图返回结果，用序号精确映射每张图的结果。
+      // 以 "uid+扩展名" 作为发送文件名仅用于唯一化，映射本身依赖顺序而非文件名回显，
+      // 从根本上避免文件名回显不一致导致的「结果不显示」问题。
+      // / Record uids in upload order; the backend yields results in the same order,
+      // so we map the Nth streamed result to the Nth uid by index — no reliance on
+      // filename echo, which eliminates "result not shown" caused by filename mismatch.
       const orderedUids: string[] = []
       fileList.forEach((file) => {
         if (file.originFileObj) {
-          formData.append('images', file.originFileObj)
+          const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : ''
+          const sentName = `${file.uid}${ext}`
+          formData.append('images', file.originFileObj, sentName)
           orderedUids.push(file.uid)
         }
       })
 
-      const response = await reverseApi.generate(formData)
-      const data = response.data
-      if (data.success && data.results) {
-        const next: Record<string, string> = {}
-        data.results.forEach((item, i) => {
-          next[orderedUids[i]] = item.error
-            ? `[错误 / Error: ${item.error}]`
-            : (item.result || '')
-        })
-        setResults(next)
-        message.success('提示词反推完成 / Prompt reverse complete')
+      // 逐图增量渲染：每张图反推完成立即显示结果 / render each result as it streams in
+      let resultIndex = 0
+      let receivedCount = 0
+      await reverseApi.generateStream(formData, (item) => {
+        const uid = orderedUids[resultIndex] ?? item.filename
+        resultIndex += 1
+        receivedCount += 1
+        const text = item.error
+          ? `[错误 / Error: ${item.error}]`
+          : (item.result || '')
+        setResults((prev) => ({ ...prev, [uid]: text }))
+      })
+      // 流结束却一条结果都没收到，说明后端返回了空流（可能图片未被接收）。
+      // 显式提示，避免界面停留在「等待反推」而让用户误以为还在处理。
+      // / Stream ended with zero results — the backend returned an empty stream
+      // (likely images were not received). Surface it clearly instead of leaving
+      // the UI stuck on "Awaiting reverse".
+      if (receivedCount === 0 && orderedUids.length > 0) {
+        message.warning('未收到任何反推结果，请检查图片是否已成功上传 / No reverse result received; check that images were uploaded')
       } else {
-        message.error(data.error || '生成失败 / Generation failed')
+        message.success('提示词反推完成 / Prompt reverse complete')
       }
     } catch (err: any) {
       message.error('请求失败 / Request failed: ' + (err.message || '未知错误'))
@@ -182,7 +220,7 @@ const ReversePage: React.FC = () => {
 
       {/* 配置区 / Configuration */}
       <Row gutter={16} style={{ marginTop: 16 }}>
-        <Col xs={24} md={8}>
+        <Col xs={24} md={6}>
           <Card title="反推目标 / Reverse Target" size="small">
             <Select
               value={reverseTarget}
@@ -192,7 +230,7 @@ const ReversePage: React.FC = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} md={8}>
+        <Col xs={24} md={6}>
           <Card title="提示词长度 / Prompt Length" size="small">
             <InputNumber
               min={50} max={10000} step={1} precision={0}
@@ -204,7 +242,7 @@ const ReversePage: React.FC = () => {
             </Text>
           </Card>
         </Col>
-        <Col xs={24} md={8}>
+        <Col xs={24} md={6}>
           <Card title="反推提示词风格 / Reverse Style" size="small">
             <Select
               value={reverseStyle}
@@ -221,6 +259,16 @@ const ReversePage: React.FC = () => {
                 </Select.Option>
               ))}
             </Select>
+          </Card>
+        </Col>
+        <Col xs={24} md={6}>
+          <Card title="输出语言 / Output Language" size="small">
+            <Select
+              value={outputLanguage}
+              onChange={(val) => setOutputLanguage(val)}
+              style={{ width: '100%' }}
+              options={OUTPUT_LANGUAGES}
+            />
           </Card>
         </Col>
       </Row>
@@ -302,11 +350,22 @@ const ReversePage: React.FC = () => {
                     )
                   }
                   extra={
-                    hasResult ? (
-                      <Button size="small" icon={<CopyOutlined />} onClick={() => copyPrompt(res)}>
-                        复制 / Copy
-                      </Button>
-                    ) : null
+                    <Space size={4}>
+                      {hasResult && (
+                        <Button size="small" icon={<CopyOutlined />} onClick={() => copyPrompt(res)}>
+                          复制 / Copy
+                        </Button>
+                      )}
+                      <Tooltip title="删除此图片 / Delete this image">
+                        <Button
+                          size="small"
+                          danger
+                          type="text"
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleRemoveFile(file.uid)}
+                        />
+                      </Tooltip>
+                    </Space>
                   }
                 >
                   {loading && !hasResult ? (

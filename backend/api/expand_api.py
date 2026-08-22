@@ -11,8 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from core.engine import PromptEngine
-from providers.base import InferenceResult
+from core.engine import PromptEngine, build_output_language_hint
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +61,7 @@ class ExpandRequest(BaseModel):
     visual_style: str = ""  # visual style keywords / 视觉风格关键词
     expansion_style: str = ""
     target_length: int = 0  # 扩写长度(字符) / target length in characters
+    output_language: str = ""  # 输出语言 ("zh"/"en") / output language
     extra_context: str = ""
     images: list[str] = []  # base64 data URLs of reference images / 参考图片的base64数据URL
 
@@ -102,58 +102,6 @@ def _decode_image_data(data: str, temp_dir: Path, index: int) -> str | None:
     return str(file_path)
 
 
-async def _generate_with_length_retry(
-    engine: PromptEngine,
-    skill_name: str,
-    body: ExpandRequest,
-    image_paths: list[str],
-    base_extra: str,
-) -> InferenceResult:
-    """Generate the prompt, retrying with a correction instruction if too short.
-
-    生成提示词；当设置了扩写长度时，若输出明显短于目标，则追加纠偏指令重试。
-    / Generates the prompt; when a target length is set, retries with an explicit
-    correction instruction if the output falls short. Models often under-deliver on
-    soft "approximately N characters" instructions, so this enforces the length.
-    """
-    target = body.target_length or 0
-    max_retries = 2  # 最多额外重试次数 / max additional retry attempts
-
-    # 提高 max_tokens，避免长目标被截断 / raise max_tokens to avoid truncation
-    gen_kwargs: dict[str, int] = {}
-    if target > 0:
-        # 中文字符最多约 2 token/字，留余量并设上下限 / up to ~2 tokens per CJK char, capped
-        gen_kwargs["max_tokens"] = max(4096, min(target * 2 + 512, 16384))
-
-    result: InferenceResult | None = None
-    extra = base_extra
-    for _attempt in range(max_retries + 1):
-        result = await engine.generate(
-            feature="expand",
-            skill_name=skill_name,
-            user_text=body.short_prompt,
-            images=image_paths or None,
-            extra_context=extra,
-            **gen_kwargs,
-        )
-        # 达标（≥90%）即停，避免无谓重试 / stop once within 90% of target
-        if target <= 0 or len(result.text) >= int(target * 0.9):
-            break
-        # 追加纠偏指令，明确告知当前长度不足 / append correction with current length
-        extra = (
-            f"{base_extra}\n\n"
-            f"*** 长度纠偏 / Length correction: 上一次输出只有 {len(result.text)} 个字符，"
-            f"未达到 {target} 字符的要求。请重新生成，补充更多细节"
-            f"（材质、光影、构图、环境、色彩、镜头参数等），将内容扩写到约 {target} 个字符，"
-            f"保持核心意图与风格不变。\n"
-            f"Previous output was only {len(result.text)} chars; expand to ~{target} chars "
-            f"with more detail while keeping the core intent. ***"
-        )
-
-    assert result is not None  # 循环至少执行一次 / loop runs at least once
-    return result
-
-
 @router.post("")
 async def expand_prompt(request: Request, body: ExpandRequest):
     """
@@ -185,6 +133,12 @@ async def expand_prompt(request: Request, body: ExpandRequest):
     # 素材 / Materials — 明确告知模型已附上实际图片及其对应关系（各类型共用）
     # / Reference images note — shared by all expansion types
     extra_parts: list[str] = []
+
+    # 输出语言 / output language
+    lang_hint = build_output_language_hint(body.output_language)
+    if lang_hint:
+        extra_parts.append(lang_hint)
+
     if image_paths:
         extra_parts.append(
             f"*** 参考图片 / Reference images: 用户已上传 {len(image_paths)} 张图片，"
@@ -245,12 +199,22 @@ async def expand_prompt(request: Request, body: ExpandRequest):
         extra += f"\n\n{body.extra_context}"
 
     try:
-        result = await _generate_with_length_retry(
-            engine=engine,
+        # 单次生成，不再因长度不足而自动重试 / single generation, no auto-retry on length.
+        # 用户对结果不满意时可再次点击生成按钮重试，避免后台自动重试浪费计算资源。
+        # / Users can re-click the generate button when unsatisfied; avoid wasting
+        # compute on automatic retries.
+        gen_kwargs: dict[str, int] = {}
+        if body.target_length:
+            # 提高 max_tokens，避免长目标被截断 / raise max_tokens to avoid truncation
+            gen_kwargs["max_tokens"] = max(4096, min(body.target_length * 2 + 512, 16384))
+
+        result = await engine.generate(
+            feature="expand",
             skill_name=skill_name,
-            body=body,
-            image_paths=image_paths,
-            base_extra=extra,
+            user_text=body.short_prompt,
+            images=image_paths or None,
+            extra_context=extra,
+            **gen_kwargs,
         )
         return {
             "success": True,

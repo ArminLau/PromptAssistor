@@ -209,6 +209,12 @@ const DANBOORU_MODELS = [
   { value: 'sdxl', label: 'SDXL' },
 ]
 
+// 输出语言选项 / output language options
+const OUTPUT_LANGUAGES = [
+  { value: 'zh', label: '中文 / Chinese' },
+  { value: 'en', label: '英文 / English' },
+]
+
 // ─── Component / 组件 ───────────────────────────────────────────────────
 
 const ExpandPage: React.FC = () => {
@@ -227,6 +233,7 @@ const ExpandPage: React.FC = () => {
   const [expansionType, setExpansionType] = useState<string>('minimax_h3')   // 扩写类型 / expansion type
   const [modelType, setModelType] = useState<string>('flux')                 // 模型类型 / model type
   const [targetLength, setTargetLength] = useState<number | null>(500)       // 扩写长度(字符) / target length
+  const [outputLanguage, setOutputLanguage] = useState<string>('zh')         // 输出语言 / output language
 
   // Cleanup preview URLs on unmount / 卸载时清理Object URL
   useEffect(() => {
@@ -269,6 +276,18 @@ const ExpandPage: React.FC = () => {
     setMaterials([])
     setUploadFiles([])
     resetTagCounter()
+  }
+
+  // ── Handle removing a single material / 删除单个素材 ───────────────
+  // 同时从 materials 与 Dragger 的 uploadFiles 中移除，并回收预览 URL。
+  // / Remove from both materials and the Dragger's uploadFiles, and revoke the preview URL.
+  const handleRemoveMaterial = (id: string) => {
+    const target = materials.find(m => m.id === id)
+    if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
+    setMaterials(materials.filter(m => m.id !== id))
+    if (target) {
+      setUploadFiles(uploadFiles.filter(f => f.uid !== target.file.uid))
+    }
   }
 
   // ── Handle expansion type switch / 处理扩写类型切换 ──────────────────
@@ -364,6 +383,7 @@ const ExpandPage: React.FC = () => {
         skill_name: option?.skill,
         short_prompt: description,
         images,
+        output_language: outputLanguage,
       }
       if (expansionType === 'minimax_h3') {
         payload.target_duration = duration || 5
@@ -429,6 +449,16 @@ const ExpandPage: React.FC = () => {
           onChange={handleTypeChange}
           style={{ width: '100%' }}
           options={EXPANSION_TYPES.map(t => ({ value: t.value, label: t.label }))}
+        />
+      </Card>
+
+      {/* 输出语言 / Output Language */}
+      <Card title="输出语言 / Output Language" size="small" style={{ marginTop: 12 }}>
+        <Select
+          value={outputLanguage}
+          onChange={(val) => setOutputLanguage(val)}
+          style={{ width: 240 }}
+          options={OUTPUT_LANGUAGES}
         />
       </Card>
 
@@ -560,24 +590,41 @@ const ExpandPage: React.FC = () => {
                 </Text>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                   {materials.map((m) => (
-                    <Tooltip
-                      key={m.id}
-                      title={`${m.id} — ${m.fileName}\n点击插入引用 / Click to insert reference`}
-                      placement="top"
-                    >
-                      <div
-                        onClick={() => handleChipClick(m)}
-                        style={{ cursor: 'pointer', textAlign: 'center' }}
+                    <div key={m.id} style={{ position: 'relative' }}>
+                      <Tooltip
+                        title={`${m.id} — ${m.fileName}\n点击插入引用 / Click to insert reference`}
+                        placement="top"
                       >
-                        <MaterialThumb material={m} size={80} />
-                        <div style={{ marginTop: 3 }}>
-                          <Tag color={getMaterialColor(m.type)} icon={getMaterialIcon(m.type)}
-                            style={{ fontSize: 10, margin: 0, lineHeight: '16px', padding: '0 4px' }}>
-                            {m.id}
-                          </Tag>
+                        <div
+                          onClick={() => handleChipClick(m)}
+                          style={{ cursor: 'pointer', textAlign: 'center' }}
+                        >
+                          <MaterialThumb material={m} size={80} />
+                          <div style={{ marginTop: 3 }}>
+                            <Tag color={getMaterialColor(m.type)} icon={getMaterialIcon(m.type)}
+                              style={{ fontSize: 10, margin: 0, lineHeight: '16px', padding: '0 4px' }}>
+                              {m.id}
+                            </Tag>
+                          </div>
                         </div>
-                      </div>
-                    </Tooltip>
+                      </Tooltip>
+                      {/* 右上角删除按钮 / top-right delete button */}
+                      <Tooltip title="删除此素材 / Delete this material">
+                        <Button
+                          size="small"
+                          danger
+                          shape="circle"
+                          icon={<DeleteOutlined />}
+                          onClick={(e) => { e.stopPropagation(); handleRemoveMaterial(m.id) }}
+                          style={{
+                            position: 'absolute', top: -8, right: -8, width: 22, height: 22,
+                            minWidth: 22, padding: 0, fontSize: 12, lineHeight: 1,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                          }}
+                        />
+                      </Tooltip>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -602,19 +649,28 @@ const ExpandPage: React.FC = () => {
               }}>
                 <Text type="secondary" style={{ fontSize: 12, marginRight: 4 }}>素材 / Materials:</Text>
                 {materials.map((m) => (
-                  <Tooltip key={m.id} title={`${m.id} — ${m.fileName}\n点击插入 / Click to insert`}>
-                    <div onClick={() => handleChipClick(m)}
-                      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-                        background: '#fff', borderRadius: 6, padding: '3px 8px 3px 4px',
-                        border: '1px solid #e8e8e8', transition: 'box-shadow 0.2s',
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 0 0 2px #1677ff40'}
-                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
-                    >
-                      <MaterialThumb material={m} size={36} />
-                      <Text style={{ fontSize: 12, fontWeight: 500, color: '#333' }}>{m.id}</Text>
-                    </div>
-                  </Tooltip>
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Tooltip title={`${m.id} — ${m.fileName}\n点击插入 / Click to insert`}>
+                      <div onClick={() => handleChipClick(m)}
+                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                          background: '#fff', borderRadius: 6, padding: '3px 8px 3px 4px',
+                          border: '1px solid #e8e8e8', transition: 'box-shadow 0.2s',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 0 0 2px #1677ff40'}
+                        onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                      >
+                        <MaterialThumb material={m} size={36} />
+                        <Text style={{ fontSize: 12, fontWeight: 500, color: '#333' }}>{m.id}</Text>
+                      </div>
+                    </Tooltip>
+                    <Tooltip title="删除此素材 / Delete this material">
+                      <Button
+                        size="small" danger type="text" icon={<DeleteOutlined />}
+                        onClick={() => handleRemoveMaterial(m.id)}
+                        style={{ padding: 0, minWidth: 18, height: 18, fontSize: 11, lineHeight: 1 }}
+                      />
+                    </Tooltip>
+                  </div>
                 ))}
               </div>
             )}

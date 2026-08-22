@@ -9,11 +9,71 @@ Orchestrates the prompt generation flow:
 """
 
 import logging
+import re
 from typing import Any
 
 from providers.base import BaseProvider, InferenceResult, ProviderNotAvailableError
 
 logger = logging.getLogger(__name__)
+
+
+# 匹配推理模型输出的思考结束标记 / matches the reasoning model's thinking-end marker
+_THINK_END_RE = re.compile(r"</think\s*>", re.IGNORECASE)
+
+
+def _strip_thinking(text: str) -> str:
+    """剥离推理模型的思考内容，仅保留最终答案 / strip reasoning content, keep the final answer.
+
+    Qwen3.5 等推理模型会输出 ``<think>...</think>`` 思考块；但当前 chat 模板未配置
+    reasoning 提取，导致思考正文或残留的 ``</think>`` 标记泄漏到结果中（例如结果以
+    ``</think>`` 开头，或思考正文直接泄漏）。这里取最后一个 ``</think>`` 之后的内容
+    作为最终答案；若无 ``</think>``，则仅剥离开头可能残留的 ``<think>`` 标记。
+    / Reasoning models (Qwen3.5 etc.) emit a ``<think>...</think>`` block, but the
+    current chat template has no reasoning extraction, so the thinking content or a
+    stray ``</think>`` marker leaks into the result (e.g. results starting with
+    ``</think>``, or raw reasoning leaking through). Treat everything after the last
+    ``</think>`` as the final answer; if there is none, just strip a stray leading
+    ``<think>`` tag.
+    """
+    if not text:
+        return text
+
+    matches = list(_THINK_END_RE.finditer(text))
+    if matches:
+        # 最后一个 </think> 之后的内容即最终答案 / content after the last </think> is the answer
+        return text[matches[-1].end():].strip()
+
+    # 无 </think> 时，仅剥离开头可能残留的 <think> 标记（保守处理）
+    # / no </think>: conservatively strip a stray leading <think> tag only
+    return re.sub(r"^\s*<think\s*>", "", text, flags=re.IGNORECASE).strip()
+
+
+# 输出语言 → 注入 system prompt 的语言要求 / output language → instruction injected into the system prompt
+_OUTPUT_LANGUAGE_HINTS: dict[str, str] = {
+    "zh": (
+        "*** 输出语言要求（必须遵守） / Output language (mandatory): "
+        "最终输出的提示词必须使用简体中文撰写。***\n"
+        "The final prompt MUST be written in Simplified Chinese."
+    ),
+    "en": (
+        "*** 输出语言要求（必须遵守） / Output language (mandatory): "
+        "最终输出的提示词必须使用英文撰写。***\n"
+        "The final prompt MUST be written in English."
+    ),
+}
+
+
+def build_output_language_hint(language: str) -> str:
+    """根据用户选择的输出语言生成注入提示 / Build the output-language instruction.
+
+    Args:
+        language: 输出语言标识（"zh"/"en"）/ output language code ("zh"/"en").
+
+    Returns:
+        语言要求说明文本；未知语言返回空串 / the language requirement text,
+        or an empty string for unknown codes.
+    """
+    return _OUTPUT_LANGUAGE_HINTS.get(language, "")
 
 
 class PromptEngine:
@@ -106,6 +166,9 @@ class PromptEngine:
             video=video,
             **kwargs,
         )
+
+        # 剥离推理模型泄漏的思考内容，仅保留最终答案 / strip leaked reasoning, keep final answer
+        result.text = _strip_thinking(result.text)
 
         logger.info(f"Generation complete: {len(result.text)} chars, {result.tokens_used} tokens")
         return result
