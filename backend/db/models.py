@@ -116,3 +116,76 @@ class SkillOverride(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class Dataset(Base):
+    """
+    数据集 / Dataset.
+
+    A dataset is a subfolder under the datasets directory. Each dataset keeps
+    its own independent reverse-engineering configuration (target model, prompt
+    length, style, output language), persisted so reopening shows the last config.
+    / 数据集是datasets目录下的一个子文件夹。每个数据集持有独立的反推配置，持久化后重新打开即回填。
+    """
+
+    __tablename__ = "datasets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(500), unique=True, nullable=False)
+    # 反推目标原始值 / raw reverse target value (e.g. "natural_prompt:krea2" or "reference")
+    reverse_target = Column(String(200), nullable=False, default="natural_prompt:krea2")
+    target_length = Column(Integer, nullable=False, default=500)
+    reverse_style = Column(String(50), nullable=False, default="five_point")
+    output_language = Column(String(10), nullable=False, default="zh")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self) -> dict:
+        """Convert model to dictionary for API response."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "reverse_target": self.reverse_target,
+            "target_length": self.target_length,
+            "reverse_style": self.reverse_style,
+            "output_language": self.output_language,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class DatasetItem(Base):
+    """
+    数据集素材 / Dataset item.
+
+    A single image (with its same-name .txt prompt) inside a dataset. The
+    filesystem is the source of truth; this table is an index cache that makes
+    listing a dataset fast without re-reading every .txt file.
+    / 数据集内的一张图片（及同名txt提示词）。文件系统是唯一事实源，本表作为索引缓存加速列表加载。
+    """
+
+    __tablename__ = "dataset_items"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "filename", name="uq_dataset_item_file"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    dataset_id = Column(
+        Integer,
+        ForeignKey("datasets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    filename = Column(String(500), nullable=False)
+    prompt_text = Column(Text, nullable=True, default=None)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self) -> dict:
+        """Convert model to dictionary for API response."""
+        return {
+            "id": self.id,
+            "dataset_id": self.dataset_id,
+            "filename": self.filename,
+            "prompt_text": self.prompt_text,
+        }

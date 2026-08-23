@@ -56,6 +56,9 @@ backend/static/*
 models/*
 !models/README.md
 
+# User datasets (batch tagging: images + prompt txt, generated at runtime)
+datasets/
+
 # User uploaded media (test files, temp uploads)
 uploads/
 temp/

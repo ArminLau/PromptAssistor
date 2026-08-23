@@ -619,9 +619,9 @@ Base URL: `http://localhost:{PORT}/api/v1`
 
 ## 当前开发状态
 
-- **当前阶段:** Phase 1 进行中 — 前后端集成、设置页面、打包完成
-- **最后更新:** 2026-08-15 (Session 12: 本地模型视觉修复 — 升级 llama-cpp-python 0.3.46 + Qwen35ChatHandler + image_min_tokens=1024)
-- **下一步任务:** 端到端测试 F1/F2 生成流程（已具备本地 GPU 模型 + 可用的在线 API）
+- **当前阶段:** Phase 1 进行中 — 前后端集成、设置页面、打包完成、批量打标完成
+- **最后更新:** 2026-08-23 (Session 14: 批量打标 UI 优化 — 完整缩略图 + 点击放大 + textarea 提示词 + 删除修复)
+- **下一步任务:** 端到端测试 F1/F2/F3 生成流程（已具备本地 GPU 模型 + 可用的在线 API）
 
 ### 已完成 (Phase 0 + Phase 1 部分)
 - [x] 技术栈选型 + 产品架构设计
@@ -650,6 +650,8 @@ Base URL: `http://localhost:{PORT}/api/v1`
 - [x] **工作空间持久化:** 修复扁平键检测 + 默认路径显示 + 原生文件夹选择器
 - [x] **GPU 版 exe 打包:** llama_cpp + CUDA DLL 完整打进 exe，本地模型 GPU 加速验证通过（Session 11）
 - [x] **本地模型视觉修复:** llama-cpp-python 0.3.20 → 0.3.46 (JamePeng cu130)，Qwen35ChatHandler + image_min_tokens=1024，图片识别正常（Session 12）
+- [x] **批量打标 (F3):** 数据集 CRUD + 素材管理 + 单张/批量打标 + 前后端分页（Session 13）
+- [x] **反推规格抽取:** 反推目标/风格/上下文拼装抽取到 `core/reverse_spec.py`（F1/F3 复用，消除 feature 互导）
 
 ### ⚠️ 已知问题
 
@@ -673,6 +675,71 @@ Base URL: `http://localhost:{PORT}/api/v1`
 ---
 
 ## 会话日志
+
+### 2026-08-23 (Session 14)
+- **批量打标 UI 优化 + 删除修复 / Batch tagging UI polish + delete fix:**
+  - **需求 1 — 完整缩略图:** 数据集卡片封面与素材小卡片由 `object-fit: cover`（裁剪）改为
+    `contain`（完整展示）；素材缩略图改用 AntD `Image` 组件，点击放大预览仔细查看。
+  - **需求 2/3 — 提示词 textarea:** 素材卡片内反推提示词改用 `Input.TextArea`（readOnly、
+    autoSize）承载 + 「复制」按钮；打标进行中时该区域显示 `Spin` loading + 「打标中...」，
+    打标结束后再展示打标后的提示词。
+  - **需求 4 — 删除修复（Windows 文件占用）:**
+    - **根因:** 删除不是路径问题——`_dataset_folder(name) = consts.DATASETS_DIR / name`
+      已正确拼接工作空间 + datasets + 数据集名。真正的坑是 **Windows 文件占用**：图片正被
+      `FileResponse` 作为缩略图流式发送时句柄未释放，`img.unlink()` 抛 `PermissionError`
+      (WinError 32) → 素材删除 500；`delete_dataset` 用 `shutil.rmtree(ignore_errors=True)`
+      **静默吞错** → 文件夹删不干净，下次 `list_datasets` 重新扫描又把数据集「复活」
+      （且配置被重置为默认），看起来像删除失效。
+    - **修复:** 新增 `_remove_file_robust` / `_remove_tree_robust`（3 次重试 + 0.15s 间隔，
+      锁通常毫秒级释放）；`delete_dataset` 去掉 `ignore_errors=True`，删不干净时**显式抛错**
+      且不删 DB 记录（保持磁盘与索引一致）；`delete_items` 逐文件删除，失败项记入
+      `failed` 返回（保留 DB 记录），前端提示「文件被占用请重试」并按实际 `deleted` 数刷新分页。
+  - **前端:** `DatasetListView.tsx`（cover → contain）、`DatasetDetailView.tsx`（`Image` 预览 +
+    `TextArea` + `copyPrompt` + 删除返回 `failed` 处理）、`services/api.ts`（`deleteItems` 类型加
+    `failed` 字段）。
+  - **验证:** 后端 `py_compile` OK；前端 `tsc --noEmit` 零错误 + `vite build` 成功并部署到
+    `backend/static/`。curl 实测 ASCII/中文名数据集删除、素材删除（DELETE 带 body）、CORS
+    DELETE 预检均正常，确认删除链路本身可用，根因在文件占用。
+
+### 2026-08-23 (Session 13)
+- **批量打标功能完整实现 (F3) / Batch tagging feature implemented:**
+  - **用户需求:** 原「批量打标」页面不可用，重新细化并完整实现。核心规格：
+    (1) 页面加载查询 `datasets/` 目录，每个子文件夹 = 一个数据集，卡片显示封面（首图）+ 名称；
+    (2) 点卡片进详情页，展示全部素材（图片 + 同名 .txt 提示词），本地 DB 缓存加速；
+    (3) 右上角模糊搜索 + 「新建数据集」弹窗（重名拒绝）；
+    (4) 每卡片支持重命名（同步文件夹名）+ 删除（二次确认，删文件 + DB + 目录）；
+    (5) 详情页：添加素材（多选复制）、删除选中、左侧反推配置（反推目标/长度/风格/输出语言，
+    每数据集独立持久化）、素材卡片（左上 checkbox、右上打标/删除、图片 object-fit cover、
+    下方提示词）、分页默认 12。
+  - **关键决策 (用户确认):**
+    - `datasets/` 目录 → 工作空间 `datasets/`（未启用工作空间回退项目根）。
+    - 打标按**勾选选中**的素材执行，每数据集页新增「全选」checkbox；无论是否已打标都重打。
+    - 分页**前端 + 后端**都要支持（服务端 page/page_size + AntD Pagination）。
+  - **架构设计:**
+    - **文件系统为事实源，DB 为索引缓存**：图片 + 同名 .txt 提示词文件是权威数据，
+      `Dataset`/`DatasetItem` 两张表仅缓存目录扫描结果 + 每数据集独立反推配置，既满足
+      「维护在本地数据库」又保留 txt 文件可迁移性。
+    - **消除 feature 互导:** F3 批量打标需要复用 F1 反推的上下文拼装，抽取
+      `core/reverse_spec.py`（`REVERSE_MODEL_LABELS`/`REVERSE_STYLE_INSTRUCTIONS`/
+      `parse_reverse_target`/`build_extra_context`），F1/F3 共用。
+    - 沿用 Session 5 的「动态属性访问」模式：`import app.constants as consts` →
+      `consts.DATASETS_DIR`，工作空间切换后自动生效。
+  - **后端 (8 文件):** `constants.py`（`DATASETS_DIR`）、`config.py`、`workspace_manager.py`、
+    `models.py`（`Dataset` + `DatasetItem`，`UniqueConstraint(dataset_id, filename)`）、
+    `core/reverse_spec.py`（新增）、`api/reverse_api.py`（复用）、
+    `features/dataset_manager.py`（新增，CRUD + 文件操作 + 打标落盘）、
+    `api/batch_api.py`（重写，7 端点 + 图片静态服务，防路径穿越）。
+  - **前端 (7 文件):** `constants/reverseOptions.ts`（新增共享常量）、
+    `components/ReverseConfigFields.tsx`（新增复用组件）、`pages/BatchPage.tsx`（路由切换）、
+    `pages/DatasetListView.tsx`（新增）、`pages/DatasetDetailView.tsx`（新增）、
+    `pages/ReversePage.tsx`、`services/api.ts` + `App.tsx` + `components/Layout.tsx`
+    （子路由 `/batch/:datasetName` + 侧边栏前缀高亮）。
+  - **验证:** 后端 py_compile + import OK，7 个 batch 端点注册成功；前端 `tsc --noEmit`
+    零错误 + `vite build` 成功；隔离冒烟测试全过（重名拒绝、增删改查、配置持久化、
+    txt 落盘、路径穿越拦截 `../evil.png` / `/etc/passwd` → None）；无残留旧 `batchApi.tag`。
+  - **注意 (与 i18n 规范偏差):** 本次新增 UI 文本沿用现有页面的「内联中英双语字符串」约定
+    （与 ReversePage/BatchPage 一致），未新增 locale JSON 条目——这是当前代码库实际做法，
+    与 CLAUDE.md「不得硬编码」条款存在偏差，可后续统一重构。
 
 ### 2026-08-15 (Session 12)
 - **本地模型视觉修复 (Qwen3.5 图片识别) / Local model vision fix:**
@@ -1025,6 +1092,35 @@ start_app.bat
 > ✅ 正确: ASCII 编码 + 英文注释 → 稳定运行
 >
 > 参考: 项目下 `scripts/dev_backend.bat`、`scripts/setup_env.bat` 同样使用 ASCII 编码。
+
+### ⚠️ 每次开发后必做 — 重新构建前端 (MUST DO after every frontend change)
+
+`start_app.bat` 走**源码模式**：后端直接从 `backend/static/` 目录 serve 前端页面
+（`app/constants.py` 中 `DEFAULT_STATIC_DIR = BACKEND_ROOT / "static"`），**不是** `frontend/dist/`，
+也**不是** Vite dev server（`localhost:5173`）。
+
+因此：**只要改了前端代码（新需求 / 修 bug），`start_app.bat` 默认仍打开旧页面**，必须重新构建并把产物拷贝到 `backend/static/`。
+
+**✅ 一键脚本（推荐 / Recommended）：双击 `scripts/build_frontend.bat`**
+
+自动完成「检查 Node → 构建前端 (`npx vite build`) → 清空并拷贝到 `backend/static/`」，一条命令搞定。
+（纯 ASCII 编码，符合项目 `.bat` 规范；后端纯 Python 改动无需此步。）
+
+等价的手动命令 / Equivalent manual commands:
+
+```bash
+# 1. 构建前端 / Build frontend
+cd frontend
+npx vite build
+
+# 2. 拷贝到后端静态目录 / Copy build output to backend static dir
+cd ..
+rm -rf backend/static
+cp -r frontend/dist backend/static
+```
+
+> 验证 / Verify: `backend/static/index.html` + `assets/` 时间戳应刚刚更新。
+> 打包 exe（PyInstaller）同理——Step 1 必须先 `npx vite build`，否则 exe 内嵌过期页面。
 
 ### 分别启动 (开发模式 / Development)
 ```bash

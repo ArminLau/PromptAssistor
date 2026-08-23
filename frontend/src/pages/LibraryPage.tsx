@@ -1,5 +1,6 @@
 /**
  * F4: 提示词维护 (Prompt Library)
+ * / Prompt Library — manage saved prompts.
  */
 
 import React, { useEffect, useState } from 'react'
@@ -7,10 +8,12 @@ import { Card, Table, Button, Input, Tag, Space, Typography, message, Popconfirm
 import { PlusOutlined, SearchOutlined, StarOutlined, DeleteOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { libraryApi, PromptItem } from '../services/api'
+import { useI18n } from '../i18n'
 
 const { Title, Text } = Typography
 
 const LibraryPage: React.FC = () => {
+  const { t, language } = useI18n()
   const [prompts, setPrompts] = useState<PromptItem[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -23,7 +26,7 @@ const LibraryPage: React.FC = () => {
         setPrompts(response.data.prompts || [])
       }
     } catch (err: any) {
-      message.error('加载失败: ' + (err.message || '未知错误'))
+      message.error(t('library.loadFailed') + ': ' + (err.message || t('common.unknownError')))
     } finally {
       setLoading(false)
     }
@@ -31,21 +34,33 @@ const LibraryPage: React.FC = () => {
 
   useEffect(() => {
     loadPrompts()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleDelete = async (id: number) => {
     try {
       await libraryApi.delete(id)
-      message.success('已删除')
+      message.success(t('library.deleted'))
       loadPrompts()
     } catch (err: any) {
-      message.error('删除失败: ' + (err.message || '未知错误'))
+      message.error(t('library.deleteFailed') + ': ' + (err.message || t('common.unknownError')))
     }
+  }
+
+  // 来源类型 → 显示文本 / source type → display label
+  const sourceLabel = (text: string): string => {
+    const map: Record<string, string> = {
+      reverse: t('library.source.reverse'),
+      expand: t('library.source.expand'),
+      manual: t('library.source.manual'),
+      batch: t('library.source.batch'),
+    }
+    return map[text] || text
   }
 
   const columns: ColumnsType<PromptItem> = [
     {
-      title: '标题',
+      title: t('library.column.title'),
       dataIndex: 'title',
       width: 200,
       render: (text, record) => (
@@ -58,19 +73,19 @@ const LibraryPage: React.FC = () => {
       ),
     },
     {
-      title: '模型',
+      title: t('library.column.model'),
       dataIndex: 'model_name',
       width: 120,
       render: (text) => text || '-',
     },
     {
-      title: '分类',
+      title: t('library.column.category'),
       dataIndex: 'category',
       width: 100,
       render: (text) => <Tag>{text || 'General'}</Tag>,
     },
     {
-      title: '标签',
+      title: t('library.column.tags'),
       dataIndex: 'tags',
       width: 200,
       render: (tags: string[]) => (
@@ -82,27 +97,24 @@ const LibraryPage: React.FC = () => {
       ),
     },
     {
-      title: '来源',
+      title: t('library.column.source'),
       dataIndex: 'source_type',
       width: 80,
-      render: (text) => {
-        const map: Record<string, string> = { reverse: '反推', expand: '扩写', manual: '手动', batch: '批量' }
-        return map[text] || text
-      },
+      render: (text) => sourceLabel(text),
     },
     {
-      title: '更新时间',
+      title: t('library.column.updated'),
       dataIndex: 'updated_at',
       width: 160,
-      render: (text) => text ? new Date(text).toLocaleString('zh-CN') : '-',
+      render: (text) => text ? new Date(text).toLocaleString(language === 'zh' ? 'zh-CN' : 'en-US') : '-',
     },
     {
-      title: '操作',
+      title: t('library.column.actions'),
       width: 100,
       render: (_, record) => (
         <Space>
           <Button type="text" icon={<StarOutlined />} size="small" />
-          <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}>
+          <Popconfirm title={t('library.confirmDelete')} onConfirm={() => handleDelete(record.id)}>
             <Button type="text" danger icon={<DeleteOutlined />} size="small" />
           </Popconfirm>
         </Space>
@@ -114,19 +126,19 @@ const LibraryPage: React.FC = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <Title level={3} style={{ marginBottom: 0 }}>提示词库</Title>
-          <Text type="secondary">管理保存的提示词，支持搜索、分类和收藏</Text>
+          <Title level={3} style={{ marginBottom: 0 }}>{t('library.title')}</Title>
+          <Text type="secondary">{t('library.description')}</Text>
         </div>
         <Space>
           <Input
-            placeholder="搜索提示词..."
+            placeholder={t('library.searchPlaceholder')}
             prefix={<SearchOutlined />}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onPressEnter={loadPrompts}
             style={{ width: 240 }}
           />
-          <Button icon={<PlusOutlined />}>手动添加</Button>
+          <Button icon={<PlusOutlined />}>{t('library.manualAdd')}</Button>
         </Space>
       </div>
 

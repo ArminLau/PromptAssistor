@@ -26,6 +26,7 @@ class WorkspaceManager:
     - skills/     — model skill files / 模型Skill文件
     - models/     — local LLM model files / 本地LLM模型文件
     - output/     — generated outputs / 生成输出文件
+    - datasets/   — dataset folders for batch tagging / 批量打标数据集目录
 
     When workspace is enabled, these override the project's default paths.
     / 启用工作空间后，这些将覆盖项目默认路径。
@@ -91,11 +92,19 @@ class WorkspaceManager:
         else:
             consts.OUTPUT_DIR = ws_path / "output"
 
+        # Resolve datasets directory / 解析Datasets目录
+        datasets_override = workspace_config.get("datasets_dir", "")
+        if datasets_override:
+            consts.DATASETS_DIR = Path(datasets_override).expanduser().resolve()
+        else:
+            consts.DATASETS_DIR = ws_path / "datasets"
+
         # Ensure all directories exist / 确保所有目录存在
         for d, name in [
             (consts.SKILLS_DIR, "skills"),
             (consts.MODELS_DIR, "models"),
             (consts.OUTPUT_DIR, "output"),
+            (consts.DATASETS_DIR, "datasets"),
         ]:
             d.mkdir(parents=True, exist_ok=True)
 
@@ -103,7 +112,8 @@ class WorkspaceManager:
             f"Workspace applied: {ws_path}\n"
             f"  skills → {consts.SKILLS_DIR}\n"
             f"  models → {consts.MODELS_DIR}\n"
-            f"  output → {consts.OUTPUT_DIR}"
+            f"  output → {consts.OUTPUT_DIR}\n"
+            f"  datasets → {consts.DATASETS_DIR}"
         )
 
         return {
@@ -112,6 +122,7 @@ class WorkspaceManager:
             "skills_dir": str(consts.SKILLS_DIR),
             "models_dir": str(consts.MODELS_DIR),
             "output_dir": str(consts.OUTPUT_DIR),
+            "datasets_dir": str(consts.DATASETS_DIR),
         }
 
     def get_workspace_info(self) -> dict[str, Any]:
@@ -123,4 +134,5 @@ class WorkspaceManager:
             "effective_skills_dir": str(consts.SKILLS_DIR),
             "effective_models_dir": str(consts.MODELS_DIR),
             "effective_output_dir": str(consts.OUTPUT_DIR),
+            "effective_datasets_dir": str(consts.DATASETS_DIR),
         }

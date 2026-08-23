@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons'
 import { modelApi, configApi, systemApi } from '../services/api'
 import type { AppConfig } from '../types'
+import { useI18n } from '../i18n'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -28,6 +29,7 @@ interface ScanResult {
 }
 
 const SettingsPage: React.FC = () => {
+  const { t } = useI18n()
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -45,6 +47,7 @@ const SettingsPage: React.FC = () => {
   useEffect(() => {
     loadConfig(true)
     scanModels()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // When switching tabs, update form values / 切换Tab时更新表单值
@@ -77,7 +80,7 @@ const SettingsPage: React.FC = () => {
         setActiveTab(resp.data.active_provider)
       }
     } catch (err: any) {
-      message.error('加载配置失败 / Failed to load config: ' + (err.message || '未知错误'))
+      message.error(t('settings.loadConfigFailed') + ': ' + (err.message || t('common.unknownError')))
     } finally {
       setLoading(false)
     }
@@ -90,7 +93,7 @@ const SettingsPage: React.FC = () => {
       const resp = await systemApi.scanModels()
       setScanned(resp.data as ScanResult)
     } catch (err: any) {
-      message.error('扫描模型目录失败 / Scan failed: ' + (err.message || '未知错误'))
+      message.error(t('settings.scanFailed') + ': ' + (err.message || t('common.unknownError')))
     } finally {
       setScanning(false)
     }
@@ -101,6 +104,7 @@ const SettingsPage: React.FC = () => {
     if (activeTab === 'local') {
       scanModels()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
   const handleSave = async () => {
@@ -144,9 +148,9 @@ const SettingsPage: React.FC = () => {
 
       await configApi.update(updateData)
       await loadConfig() // Reload / 重新加载
-      message.success('配置已保存 / Configuration saved')
+      message.success(t('settings.saved'))
     } catch (err: any) {
-      message.error('保存失败 / Save failed: ' + (err.message || '未知错误'))
+      message.error(t('settings.saveFailed') + ': ' + (err.message || t('common.unknownError')))
     } finally {
       setSaving(false)
     }
@@ -162,14 +166,14 @@ const SettingsPage: React.FC = () => {
         message: resp.data?.message || JSON.stringify(resp.data),
       })
       if (resp.data?.success) {
-        message.success('连接成功 / Connection OK')
+        message.success(t('settings.connectionOK'))
       } else {
-        message.warning('连接失败 / Connection failed: ' + resp.data?.message)
+        message.warning(t('settings.connectionFailed') + ': ' + resp.data?.message)
       }
     } catch (err: any) {
       setTestResult({
         success: false,
-        message: err.response?.data?.message || err.message || '连接测试失败',
+        message: err.response?.data?.message || err.message || t('settings.connectionTestFailed'),
       })
     } finally {
       setTesting(false)
@@ -179,10 +183,10 @@ const SettingsPage: React.FC = () => {
   const handleSwitchProvider = async (providerType: string) => {
     try {
       await modelApi.switchProvider(providerType)
-      message.success(`已切换到 ${providerType} / Switched to ${providerType}`)
+      message.success(t('settings.switched').replace('{provider}', providerType))
       loadConfig()
     } catch (err: any) {
-      message.error('切换失败 / Switch failed')
+      message.error(t('settings.switchFailed'))
     }
   }
 
@@ -193,12 +197,12 @@ const SettingsPage: React.FC = () => {
       const resp = await systemApi.selectFolder()
       if (resp.data?.success && resp.data.path) {
         form.setFieldsValue({ workspace_path: resp.data.path })
-        message.success(`已选择: ${resp.data.path}`)
+        message.success(`${t('settings.folderSelected')}: ${resp.data.path}`)
       } else {
-        message.info(resp.data?.message || '未选择文件夹 / No folder selected')
+        message.info(resp.data?.message || t('settings.noFolderSelected'))
       }
     } catch (err: any) {
-      message.error('无法打开文件夹选择器 / Cannot open folder picker: ' + (err.message || ''))
+      message.error(t('settings.cannotOpenFolder') + ': ' + (err.message || ''))
     } finally {
       setBrowsingFolder(false)
     }
@@ -207,7 +211,7 @@ const SettingsPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ padding: 48, textAlign: 'center' }}>
-        <Spin size="large" tip="加载配置中 / Loading config..." />
+        <Spin size="large" tip={t('settings.loadingConfig')} />
       </div>
     )
   }
@@ -215,30 +219,30 @@ const SettingsPage: React.FC = () => {
   return (
     <div>
       <Title level={3}>
-        <SettingOutlined /> 设置 / Settings
+        <SettingOutlined /> {t('settings.title')}
       </Title>
       <Text type="secondary">
-        配置LLM后端提供者、模型参数和工作空间 / Configure LLM providers, model parameters, and workspace
+        {t('settings.description')}
       </Text>
 
       {/* Active Provider Status / 活跃后端状态 */}
       <Card style={{ marginTop: 16, marginBottom: 16 }}>
         <Space wrap>
-          <Text strong>当前后端 / Active Provider:</Text>
+          <Text strong>{t('settings.activeProvider')}:</Text>
           <Tag color={activeTab === 'local' ? 'green' : activeTab === 'ollama' ? 'orange' : 'blue'}>
-            {activeTab === 'local' ? '💻 本地模型 / Local'
+            {activeTab === 'local' ? `💻 ${t('settings.local')}`
               : activeTab === 'ollama' ? '🦙 Ollama'
-              : '☁️ 在线API / Online'}
+              : `☁️ ${t('settings.online')}`}
           </Tag>
           <Divider type="vertical" />
-          <Text type="secondary">快速切换 / Quick Switch:</Text>
+          <Text type="secondary">{t('settings.quickSwitch')}:</Text>
           <Button
             size="small"
             type={activeTab === 'local' ? 'primary' : 'default'}
             icon={<LaptopOutlined />}
             onClick={() => handleSwitchProvider('local')}
           >
-            本地 / Local
+            {t('settings.localShort')}
           </Button>
           <Button
             size="small"
@@ -254,7 +258,7 @@ const SettingsPage: React.FC = () => {
             icon={<ApiOutlined />}
             onClick={() => handleSwitchProvider('online')}
           >
-            在线 / Online
+            {t('settings.onlineShort')}
           </Button>
         </Space>
       </Card>
@@ -271,7 +275,7 @@ const SettingsPage: React.FC = () => {
                 onClick={handleTestConnection}
                 loading={testing}
               >
-                测试连接 / Test Connection
+                {t('settings.testConnection')}
               </Button>
               <Button
                 type="primary"
@@ -279,7 +283,7 @@ const SettingsPage: React.FC = () => {
                 onClick={handleSave}
                 loading={saving}
               >
-                保存配置 / Save Config
+                {t('settings.saveConfig')}
               </Button>
             </Space>
           }
@@ -287,18 +291,18 @@ const SettingsPage: React.FC = () => {
             // ─── Tab: Local / 本地模型 ───
             {
               key: 'local',
-              label: <span><LaptopOutlined /> 本地模型 / Local</span>,
+              label: <span><LaptopOutlined /> {t('settings.local')}</span>,
               children: (
                 <div>
                   <Alert
                     type="info"
                     message={
                       <span>
-                        扫描目录 / Scan dir: <Text code>{scanned?.models_dir || 'models/'}</Text>
+                        {t('settings.scanDir')}: <Text code>{scanned?.models_dir || 'models/'}</Text>
                         <Button size="small" type="link" icon={<ReloadOutlined />}
                           loading={scanning} onClick={scanModels}
                           style={{ marginLeft: 8 }}>
-                          重新扫描 / Rescan
+                          {t('settings.rescan')}
                         </Button>
                       </span>
                     }
@@ -308,24 +312,24 @@ const SettingsPage: React.FC = () => {
                   <Form form={form} layout="vertical">
                     <Form.Item
                       name="model_path"
-                      label="模型文件 / Model File"
-                      tooltip="从 models/ 目录下扫描到的GGUF模型文件 / GGUF files scanned from models/ directory"
+                      label={t('settings.modelFile')}
+                      tooltip={t('settings.modelFileTooltip')}
                     >
                       <Select
                         showSearch
                         allowClear
-                        placeholder="选择模型文件 / Select a model file..."
+                        placeholder={t('settings.selectModel')}
                         optionFilterProp="label"
                         notFoundContent={
                           scanned ? (
                             <div style={{ padding: 8, color: '#999', textAlign: 'center' }}>
-                              未找到GGUF文件 / No GGUF files found<br />
+                              {t('settings.noGguf')}<br />
                               <Text type="secondary" style={{ fontSize: 12 }}>
-                                请将 .gguf 文件放入 / Put .gguf files in: <Text code>{scanned.models_dir}</Text>
+                                {t('settings.putGguf')}: <Text code>{scanned.models_dir}</Text>
                               </Text>
                             </div>
                           ) : (
-                            <div style={{ padding: 8 }}>扫描中... / Scanning...</div>
+                            <div style={{ padding: 8 }}>{t('settings.scanning')}</div>
                           )
                         }
                         options={(scanned?.models || []).map((m) => ({
@@ -336,17 +340,17 @@ const SettingsPage: React.FC = () => {
                     </Form.Item>
                     <Form.Item
                       name="mmproj_path"
-                      label="多模态投影器 / mmproj (可选/Optional)"
-                      tooltip="视觉模型的多模态投影器文件 / Multimodal projector for vision models"
+                      label={t('settings.mmproj')}
+                      tooltip={t('settings.mmprojTooltip')}
                     >
                       <Select
                         showSearch
                         allowClear
-                        placeholder="选择投影器文件(可选) / Select mmproj file (optional)..."
+                        placeholder={t('settings.selectMmproj')}
                         optionFilterProp="label"
                         notFoundContent={
                           <div style={{ padding: 8, color: '#999', textAlign: 'center' }}>
-                            未找到mmproj文件 / No mmproj files found
+                            {t('settings.noMmproj')}
                           </div>
                         }
                         options={(scanned?.mmproj || []).map((m) => ({
@@ -356,16 +360,16 @@ const SettingsPage: React.FC = () => {
                       />
                     </Form.Item>
                     <Space wrap style={{ width: '100%' }} size="large">
-                      <Form.Item name="n_ctx" label="上下文长度 / Context Length">
+                      <Form.Item name="n_ctx" label={t('settings.contextLength')}>
                         <InputNumber min={512} max={32768} step={512} />
                       </Form.Item>
-                      <Form.Item name="n_threads" label="CPU线程数 / Threads">
+                      <Form.Item name="n_threads" label={t('settings.threads')}>
                         <InputNumber min={1} max={64} />
                       </Form.Item>
                       <Form.Item
                         name="gpu_layers"
-                        label="GPU层数 / GPU Layers"
-                        tooltip="-1 = 全部GPU / all GPU, 0 = 仅CPU / CPU only"
+                        label={t('settings.gpuLayers')}
+                        tooltip={t('settings.gpuLayersTooltip')}
                       >
                         <InputNumber min={-1} max={999} />
                       </Form.Item>
@@ -385,49 +389,49 @@ const SettingsPage: React.FC = () => {
             // ─── Tab: Online / 在线API ───
             {
               key: 'online',
-              label: <span><ApiOutlined /> 在线API / Online</span>,
+              label: <span><ApiOutlined /> {t('settings.online')}</span>,
               children: (
                 <div>
                   <Alert
                     type="info"
-                    message="支持所有OpenAI兼容的API服务 / Supports all OpenAI-compatible API services"
+                    message={t('settings.onlineAlert')}
                     style={{ marginBottom: 16 }}
                     showIcon
                   />
                   <Form form={form} layout="vertical">
-                    <Form.Item name="provider" label="API服务商 / Provider">
+                    <Form.Item name="provider" label={t('settings.provider')}>
                       <Select
                         options={[
                           { value: 'deepseek', label: 'DeepSeek' },
                           { value: 'kimi', label: 'Kimi / Moonshot' },
-                          { value: 'glm', label: 'GLM / 智谱AI' },
+                          { value: 'glm', label: 'GLM' },
                           { value: 'gpt', label: 'OpenAI / GPT' },
-                          { value: 'custom', label: '自定义 / Custom (OpenAI Compatible)' },
+                          { value: 'custom', label: t('settings.customProvider') },
                         ]}
                       />
                     </Form.Item>
                     <Form.Item
                       name="api_base"
-                      label="API地址 / API Base URL"
-                      tooltip="OpenAI兼容的API端点 / OpenAI-compatible endpoint"
+                      label={t('settings.apiBase')}
+                      tooltip={t('settings.apiBaseTooltip')}
                     >
                       <Input placeholder="https://api.deepseek.com/v1" />
                     </Form.Item>
                     <Form.Item
                       name="api_key"
-                      label="API密钥 / API Key"
-                      tooltip="不会提交到Git仓库 / Will not be committed to Git"
+                      label={t('settings.apiKey')}
+                      tooltip={t('settings.apiKeyTooltip')}
                     >
                       <Input.Password placeholder="sk-..." />
                     </Form.Item>
-                    <Form.Item name="model_name" label="模型名称 / Model Name">
+                    <Form.Item name="model_name" label={t('settings.modelName')}>
                       <Input placeholder="deepseek-chat" />
                     </Form.Item>
                     <Space wrap style={{ width: '100%' }} size="large">
                       <Form.Item name="temperature" label="Temperature">
                         <InputNumber min={0} max={2} step={0.1} />
                       </Form.Item>
-                      <Form.Item name="max_tokens" label="最大Token数 / Max Tokens">
+                      <Form.Item name="max_tokens" label={t('settings.maxTokens')}>
                         <InputNumber min={256} max={128000} step={256} />
                       </Form.Item>
                     </Space>
@@ -443,22 +447,22 @@ const SettingsPage: React.FC = () => {
                 <div>
                   <Alert
                     type="info"
-                    message="需要先在本地安装并启动 Ollama / Requires Ollama installed and running locally"
+                    message={t('settings.ollamaAlert')}
                     style={{ marginBottom: 16 }}
                     showIcon
                   />
                   <Form form={form} layout="vertical">
                     <Form.Item
                       name="host"
-                      label="Ollama地址 / Ollama Host"
-                      tooltip="Ollama服务的HTTP地址 / HTTP address of the Ollama service"
+                      label={t('settings.ollamaHost')}
+                      tooltip={t('settings.ollamaHostTooltip')}
                     >
                       <Input placeholder="http://localhost:11434" />
                     </Form.Item>
                     <Form.Item
                       name="model_name"
-                      label="模型名称 / Model Name"
-                      tooltip="使用 ollama list 查看已安装的模型 / Use ollama list to see installed models"
+                      label={t('settings.modelName')}
+                      tooltip={t('settings.ollamaModelTooltip')}
                     >
                       <Input placeholder="qwen3:latest" />
                     </Form.Item>
@@ -472,30 +476,30 @@ const SettingsPage: React.FC = () => {
             // ─── Tab: Workspace / 工作空间 ───
             {
               key: 'workspace',
-              label: <span><FolderOutlined /> 工作空间 / Workspace</span>,
+              label: <span><FolderOutlined /> {t('settings.workspace')}</span>,
               children: (
                 <div>
                   <Alert
                     type="warning"
-                    message="工作空间可让skills/models/output文件存放到项目外，保护隐私 / Workspace keeps files outside the project for privacy"
+                    message={t('settings.workspaceAlert')}
                     style={{ marginBottom: 16 }}
                     showIcon
                   />
                   <Form form={form} layout="vertical">
                     <Form.Item
                       name="workspace_enabled"
-                      label="启用工作空间 / Enable Workspace"
+                      label={t('settings.enableWorkspace')}
                       valuePropName="checked"
                     >
                       <Switch />
                     </Form.Item>
                     <Form.Item
                       name="workspace_path"
-                      label="工作空间路径 / Workspace Path"
-                      tooltip="手动输入路径或点击浏览按钮从系统中选择 / Type path or click Browse to select"
+                      label={t('settings.workspacePath')}
+                      tooltip={t('settings.workspacePathTooltip')}
                       extra={
                         appHome && !form.getFieldValue('workspace_path')
-                          ? `默认: ${appHome} (exe所在目录 / app home directory)`
+                          ? `${t('settings.defaultPath')}: ${appHome} (${t('settings.appHomeDir')})`
                           : undefined
                       }
                     >
@@ -509,15 +513,12 @@ const SettingsPage: React.FC = () => {
                           onClick={handleBrowseFolder}
                           loading={browsingFolder}
                         >
-                          浏览 / Browse
+                          {t('common.browse')}
                         </Button>
                       </Space.Compact>
                     </Form.Item>
                     <Paragraph type="secondary">
-                      点击"浏览"按钮从系统中选择文件夹，或手动输入路径。
-                      启用后立即生效。工作空间目录将自动创建 skills/、models/、output/ 子目录。
-                      / Click "Browse" to select a folder, or type the path manually.
-                      Takes effect immediately. Subdirectories will be auto-created.
+                      {t('settings.workspaceNote')}
                     </Paragraph>
                   </Form>
                 </div>
@@ -531,7 +532,7 @@ const SettingsPage: React.FC = () => {
           <div style={{ marginTop: 16 }}>
             <Alert
               type={testResult.success ? 'success' : 'error'}
-              message={testResult.success ? '连接成功 / Connected' : '连接失败 / Connection Failed'}
+              message={testResult.success ? t('settings.connected') : t('settings.connectionFailed')}
               description={testResult.message}
               icon={testResult.success ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
               showIcon

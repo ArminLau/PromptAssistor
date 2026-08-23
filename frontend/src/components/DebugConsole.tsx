@@ -13,6 +13,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons'
 import axios from 'axios'
+import { useI18n } from '../i18n'
 
 const { Text, Paragraph } = Typography
 
@@ -36,6 +37,7 @@ interface SystemCheckResult {
 const API_BASE = 'http://127.0.0.1:18720'
 
 const DebugConsole: React.FC = () => {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [checks, setChecks] = useState<SystemCheckResult | null>(null)
   const [logs, setLogs] = useState<string[]>([])
@@ -46,6 +48,7 @@ const DebugConsole: React.FC = () => {
   // Check backend health on mount / 挂载时检查后端状态
   useEffect(() => {
     checkBackend()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const checkBackend = async () => {
@@ -70,11 +73,11 @@ const DebugConsole: React.FC = () => {
         error_count: 1,
         all_ok: false,
         results: [{
-          name: 'Backend Connection / 后端连接',
+          name: t('debug.backendConnection'),
           status: 'error',
-          message: 'Cannot reach backend / 无法连接后端',
-          detail: err.message || 'Unknown error',
-          fix: '请确认后端已启动 / Ensure backend is running: scripts\\dev_backend.bat',
+          message: t('debug.cannotReach'),
+          detail: err.message || t('common.unknownError'),
+          fix: t('debug.ensureBackend') + ': scripts\\dev_backend.bat',
         }],
       })
     } finally {
@@ -87,7 +90,7 @@ const DebugConsole: React.FC = () => {
       const resp = await axios.get(`${API_BASE}/api/v1/system/logs`, { params: { lines: 50 } })
       setLogs(resp.data?.logs || [])
     } catch {
-      setLogs(['Cannot fetch logs / 无法获取日志'])
+      setLogs([t('debug.cannotFetchLogs')])
     }
   }
 
@@ -109,17 +112,17 @@ const DebugConsole: React.FC = () => {
   }
 
   const getBadgeText = () => {
-    if (backendReachable === null) return '检查中...'
-    if (backendReachable === false) return '离线'
-    if (!checks) return '在线'
-    if (checks.all_ok) return '全部正常'
+    if (backendReachable === null) return t('debug.checking')
+    if (backendReachable === false) return t('debug.offline')
+    if (!checks) return t('debug.online')
+    if (checks.all_ok) return t('debug.allOK')
     return `${checks.error_count}E ${checks.warning_count}W`
   }
 
   return (
     <>
       {/* Trigger button / 触发按钮 */}
-      <Tooltip title="系统诊断 / System Diagnostics">
+      <Tooltip title={t('debug.title')}>
         <Button
           type="text"
           icon={
@@ -143,7 +146,7 @@ const DebugConsole: React.FC = () => {
         title={
           <Space>
             <BugOutlined />
-            系统诊断 / System Diagnostics
+            {t('debug.title')}
           </Space>
         }
         placement="bottom"
@@ -153,10 +156,10 @@ const DebugConsole: React.FC = () => {
         extra={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={checkBackend}>
-              检查后端 / Check Backend
+              {t('debug.checkBackend')}
             </Button>
             <Button type="primary" icon={<ReloadOutlined />} onClick={runSystemCheck} loading={loading}>
-              运行检测 / Run Checks
+              {t('debug.runChecks')}
             </Button>
           </Space>
         }
@@ -171,13 +174,13 @@ const DebugConsole: React.FC = () => {
             marginBottom: 16,
           }}>
             <Text strong style={{ color: '#ff4d4f' }}>
-              ⚠ 后端服务未启动 / Backend Not Running
+              ⚠ {t('debug.backendNotRunning')}
             </Text>
             <Paragraph style={{ marginTop: 8, marginBottom: 0 }}>
-              请先启动Python后端服务 / Please start the Python backend first:<br/>
+              {t('debug.startBackend')}:<br/>
               <Text code>scripts\dev_backend.bat</Text> (Windows) 或 <Text code>bash scripts/dev_backend.sh</Text> (macOS)<br/>
-              后端地址 / Backend URL: <Text code>http://127.0.0.1:18720</Text><br/>
-              启动后请确认可访问 / Verify: <Text code>http://127.0.0.1:18720/health</Text>
+              {t('debug.backendUrl')}: <Text code>http://127.0.0.1:18720</Text><br/>
+              {t('debug.verify')}: <Text code>http://127.0.0.1:18720/health</Text>
             </Paragraph>
           </div>
         )}
@@ -186,7 +189,7 @@ const DebugConsole: React.FC = () => {
         {checks && (
           <div style={{ marginBottom: 16 }}>
             <Text strong>
-              系统检查 / System Checks:
+              {t('debug.systemChecks')}:
               <Tag color={getBadgeStatus()} style={{ marginLeft: 8 }}>
                 {checks.ok_count} OK / {checks.warning_count} WARN / {checks.error_count} ERR
               </Tag>
@@ -219,8 +222,8 @@ const DebugConsole: React.FC = () => {
         {/* Recent Logs / 最近日志 */}
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <Text strong>最近日志 / Recent Logs</Text>
-            <Button size="small" onClick={fetchLogs}>刷新 / Refresh</Button>
+            <Text strong>{t('debug.recentLogs')}</Text>
+            <Button size="small" onClick={fetchLogs}>{t('debug.refresh')}</Button>
           </div>
           <div
             ref={logEndRef}
@@ -237,7 +240,7 @@ const DebugConsole: React.FC = () => {
             }}
           >
             {logs.length === 0 ? (
-              <Text style={{ color: '#888' }}>暂无日志 / No logs yet — 启动后端后可见 / visible after backend starts</Text>
+              <Text style={{ color: '#888' }}>{t('debug.noLogs')}</Text>
             ) : (
               logs.map((line, i) => (
                 <div key={i} style={{

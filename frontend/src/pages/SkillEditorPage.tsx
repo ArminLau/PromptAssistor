@@ -1,16 +1,19 @@
 /**
  * F5: Skill维护 (Skill Editor)
+ * / Skill Editor — view and customize model prompt-writing guides.
  */
 
 import React, { useEffect, useState } from 'react'
 import { Card, List, Button, Typography, message, Modal, Input, Space, Tag } from 'antd'
 import { EditOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons'
 import { skillApi, SkillInfo } from '../services/api'
+import { useI18n } from '../i18n'
 
 const { Title, Text, Paragraph } = Typography
 const { TextArea } = Input
 
 const SkillEditorPage: React.FC = () => {
+  const { t } = useI18n()
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedSkill, setSelectedSkill] = useState<any>(null)
@@ -26,7 +29,7 @@ const SkillEditorPage: React.FC = () => {
         setSkills(response.data.skills || [])
       }
     } catch (err: any) {
-      message.error('加载失败: ' + (err.message || '未知错误'))
+      message.error(t('skills.loadFailed') + ': ' + (err.message || t('common.unknownError')))
     } finally {
       setLoading(false)
     }
@@ -34,6 +37,7 @@ const SkillEditorPage: React.FC = () => {
 
   useEffect(() => {
     loadSkills()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleViewSkill = async (name: string) => {
@@ -43,7 +47,7 @@ const SkillEditorPage: React.FC = () => {
         setSelectedSkill(response.data.skill)
       }
     } catch (err: any) {
-      message.error('加载Skill详情失败')
+      message.error(t('skills.loadDetailFailed'))
     }
   }
 
@@ -55,11 +59,11 @@ const SkillEditorPage: React.FC = () => {
         override_content: editContent,
         description: editDescription,
       })
-      message.success('Skill自定义保存成功')
+      message.success(t('skills.saved'))
       setEditModalOpen(false)
       loadSkills()
     } catch (err: any) {
-      message.error('保存失败: ' + (err.message || '未知错误'))
+      message.error(t('skills.saveFailed') + ': ' + (err.message || t('common.unknownError')))
     }
   }
 
@@ -67,17 +71,17 @@ const SkillEditorPage: React.FC = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <Title level={3} style={{ marginBottom: 0 }}>Skill 维护</Title>
-          <Text type="secondary">查看和自定义各模型的提示词编写指南</Text>
+          <Title level={3} style={{ marginBottom: 0 }}>{t('skills.title')}</Title>
+          <Text type="secondary">{t('skills.description')}</Text>
         </div>
         <Button icon={<ReloadOutlined />} onClick={loadSkills}>
-          刷新列表
+          {t('skills.refresh')}
         </Button>
       </div>
 
       <div style={{ display: 'flex', gap: 16, marginTop: 16 }}>
-        {/* Skill List */}
-        <Card title="已安装的 Skills" style={{ flex: 1 }}>
+        {/* Skill List / Skill列表 */}
+        <Card title={t('skills.installed')} style={{ flex: 1 }}>
           <List
             loading={loading}
             dataSource={skills}
@@ -89,7 +93,7 @@ const SkillEditorPage: React.FC = () => {
                     icon={<EyeOutlined />}
                     onClick={() => handleViewSkill(skill.name)}
                   >
-                    查看
+                    {t('skills.view')}
                   </Button>,
                   <Button
                     type="link"
@@ -102,7 +106,7 @@ const SkillEditorPage: React.FC = () => {
                       })
                     }}
                   >
-                    自定义
+                    {t('skills.customize')}
                   </Button>,
                 ]}
               >
@@ -111,7 +115,7 @@ const SkillEditorPage: React.FC = () => {
                     <Space>
                       {skill.display_name}
                       <Tag color="blue">v{skill.version}</Tag>
-                      {skill.has_override && <Tag color="orange">已自定义</Tag>}
+                      {skill.has_override && <Tag color="orange">{t('skills.customized')}</Tag>}
                     </Space>
                   }
                   description={skill.description}
@@ -121,13 +125,13 @@ const SkillEditorPage: React.FC = () => {
           />
         </Card>
 
-        {/* Skill Detail */}
+        {/* Skill Detail / Skill详情 */}
         {selectedSkill && (
-          <Card title={`${selectedSkill.display_name} - 详细内容`} style={{ flex: 2 }}>
+          <Card title={`${selectedSkill.display_name} - ${t('skills.detail')}`} style={{ flex: 2 }}>
             <Paragraph>
-              <strong>类型:</strong> {selectedSkill.type} &nbsp;
-              <strong>版本:</strong> {selectedSkill.version} &nbsp;
-              <strong>作者:</strong> {selectedSkill.author}
+              <strong>{t('skills.type')}:</strong> {selectedSkill.type} &nbsp;
+              <strong>{t('skills.version')}:</strong> {selectedSkill.version} &nbsp;
+              <strong>{t('skills.author')}:</strong> {selectedSkill.author}
             </Paragraph>
             <div
               style={{
@@ -141,33 +145,35 @@ const SkillEditorPage: React.FC = () => {
                 fontSize: 13,
               }}
             >
-              {selectedSkill.override_content || selectedSkill.content || '加载中...'}
+              {selectedSkill.override_content || selectedSkill.content || t('common.loading')}
             </div>
           </Card>
         )}
       </div>
 
-      {/* Edit Modal */}
+      {/* Edit Modal / 编辑弹窗 */}
       <Modal
-        title="自定义 Skill"
+        title={t('skills.customizeSkill')}
         open={editModalOpen}
         onOk={handleSaveOverride}
         onCancel={() => setEditModalOpen(false)}
+        okText={t('common.save')}
+        cancelText={t('common.cancel')}
         width={800}
       >
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Text>修改说明:</Text>
+          <Text>{t('skills.editDesc')}:</Text>
           <Input
-            placeholder="简要描述你的修改内容和目的（例如：适配婚纱摄影行业）"
+            placeholder={t('skills.editDescPlaceholder')}
             value={editDescription}
             onChange={(e) => setEditDescription(e.target.value)}
           />
-          <Text>Skill 内容 (Markdown):</Text>
+          <Text>{t('skills.contentLabel')}:</Text>
           <TextArea
             rows={15}
             value={editContent || selectedSkill?.content || ''}
             onChange={(e) => setEditContent(e.target.value)}
-            placeholder="在此编辑 Skill 的 Markdown 内容..."
+            placeholder={t('skills.contentPlaceholder')}
           />
         </Space>
       </Modal>

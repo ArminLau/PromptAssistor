@@ -25,6 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "skills_dir": "",
         "models_dir": "",
         "output_dir": "",
+        "datasets_dir": "",
     },
     "providers": {
         ProviderType.LOCAL.value: {

@@ -59,6 +59,43 @@ export interface ReverseResultItem {
   tokens_used?: number
 }
 
+// ─── 数据集 / Dataset types ────────────────────────────────────────────────
+
+export interface DatasetInfo {
+  name: string
+  item_count: number
+  cover_filename: string | null
+}
+
+export interface DatasetConfig {
+  reverse_target: string
+  target_length: number
+  reverse_style: string
+  output_language: string
+}
+
+export interface DatasetItem {
+  filename: string
+  prompt_text: string | null
+}
+
+export interface DatasetDetail {
+  name: string
+  config: DatasetConfig
+  total: number
+  page: number
+  page_size: number
+  items: DatasetItem[]
+}
+
+// 批量打标流式结果项 / batch-tag streaming result item
+export interface TagResultItem {
+  filename: string
+  result?: string
+  error?: string
+  model_name?: string
+}
+
 // ─── Model API ────────────────────────────────────────────────────────────
 
 export const modelApi = {
@@ -136,13 +173,113 @@ export const expandApi = {
     api.post<GenerateResult>('/expand', data, { timeout: 180000 }),
 }
 
+// 读取 NDJSON 流并逐行回调 / Read an NDJSON stream and call onLine per line
+async function fetchNdjsonStream(
+  url: string,
+  init: RequestInit,
+  onLine: (item: unknown) => void,
+): Promise<void> {
+  const response = await fetch(url, init)
+  if (!response.ok || !response.body) {
+    throw new Error(`Request failed / 请求失败: HTTP ${response.status}`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  const handleLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    try {
+      onLine(JSON.parse(trimmed))
+    } catch (e) {
+      console.warn('Failed to parse NDJSON line / 解析流式行失败:', trimmed, e)
+    }
+  }
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    lines.forEach(handleLine)
+  }
+  if (buffer.trim()) handleLine(buffer)
+}
+
 export const batchApi = {
-  tag: (formData: FormData) =>
-    api.post('/batch/tag', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 600000, // 10 minutes for batches
+  // ─── 数据集 CRUD / dataset CRUD ────────────────────────────────
+  listDatasets: (search?: string) =>
+    api.get<{ success: boolean; datasets: DatasetInfo[] }>('/batch/datasets', {
+      params: { search: search || undefined },
     }),
-  getStatus: (taskId: string) => api.get(`/batch/status/${taskId}`),
+  createDataset: (name: string) =>
+    api.post<{ success: boolean; dataset: DatasetConfig }>('/batch/datasets', { name }),
+  renameDataset: (name: string, newName: string) =>
+    api.put<{ success: boolean }>(
+      `/batch/datasets/${encodeURIComponent(name)}`,
+      { new_name: newName },
+    ),
+  deleteDataset: (name: string) =>
+    api.delete<{ success: boolean }>(`/batch/datasets/${encodeURIComponent(name)}`),
+
+  // ─── 数据集详情与配置 / detail & config ────────────────────────
+  getDataset: (name: string, page = 1, pageSize = 12) =>
+    api.get<{ success: boolean } & DatasetDetail>(
+      `/batch/datasets/${encodeURIComponent(name)}`,
+      { params: { page, page_size: pageSize } },
+    ),
+  updateConfig: (name: string, config: Partial<DatasetConfig>) =>
+    api.put<{ success: boolean; name: string; config: DatasetConfig }>(
+      `/batch/datasets/${encodeURIComponent(name)}/config`,
+      config,
+    ),
+
+  // ─── 素材增删 / item add & delete ─────────────────────────────
+  addItems: (name: string, files: File[]) => {
+    const formData = new FormData()
+    files.forEach((f) => formData.append('files', f))
+    return api.post<{ success: boolean; added: string[]; duplicates: string[] }>(
+      `/batch/datasets/${encodeURIComponent(name)}/items`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 },
+    )
+  },
+  deleteItems: (name: string, filenames: string[]) =>
+    api.delete<{ success: boolean; deleted: string[]; failed: string[] }>(
+      `/batch/datasets/${encodeURIComponent(name)}/items`,
+      { data: { filenames } },
+    ),
+
+  // ─── 打标 / tagging ───────────────────────────────────────────
+  tagItem: (name: string, filename: string) =>
+    api.post<{ success: boolean; filename: string; prompt_text: string; model_name?: string }>(
+      `/batch/datasets/${encodeURIComponent(name)}/items/${encodeURIComponent(filename)}/tag`,
+      null,
+      { timeout: 300000 },
+    ),
+  /** 流式批量打标选中素材 / Stream batch-tag of selected items */
+  tagItems: async (
+    name: string,
+    filenames: string[],
+    onResult: (item: TagResultItem) => void,
+  ): Promise<void> => {
+    await fetchNdjsonStream(
+      `${API_BASE_URL}/batch/datasets/${encodeURIComponent(name)}/tag`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filenames }),
+      },
+      (item) => onResult(item as TagResultItem),
+    )
+  },
+
+  // ─── 图片 URL / image URL ─────────────────────────────────────
+  imageUrl: (name: string, filename: string) =>
+    `${API_BASE_URL}/batch/datasets/${encodeURIComponent(name)}/files/${encodeURIComponent(filename)}`,
 }
 
 // ─── Library API ──────────────────────────────────────────────────────────

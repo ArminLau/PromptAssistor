@@ -17,88 +17,20 @@ import {
 } from '@ant-design/icons'
 import type { UploadFile } from 'antd'
 import { reverseApi } from '../services/api'
+import {
+  getOutputLanguages,
+  getReverseStyles,
+  getReverseTargetOptions,
+  parseTarget,
+} from '../constants/reverseOptions'
+import { useI18n, pick } from '../i18n'
 
 const { Dragger } = Upload
 const { TextArea } = Input
 const { Title, Text } = Typography
 
-// ─── 反推目标 / Reverse targets ──────────────────────────────────────────
-
-const NATURAL_MODELS = [
-  { value: 'krea2', label: 'Krea 2' },
-  { value: 'z-image', label: 'Z-Image' },
-  { value: 'flux', label: 'FLUX.1' },
-  { value: 'qwen-image', label: 'Qwen-Image' },
-]
-
-const DANBOORU_MODELS = [
-  { value: 'anima', label: 'Anima' },
-  { value: 'sdxl', label: 'SDXL' },
-]
-
-// 下拉分组选项 / grouped select options（value 编码为 `skill:model_type` 或 `reference`）
-const REVERSE_TARGET_OPTIONS = [
-  {
-    label: '完全参考 / Reference Only',
-    options: [{ value: 'reference', label: '完全参考反推需求描述 / Fully follow requirement' }],
-  },
-  {
-    label: '自然语言 / Natural Language',
-    options: NATURAL_MODELS.map((m) => ({
-      value: `natural_prompt:${m.value}`,
-      label: `自然语言 ${m.label} / Natural Language ${m.label}`,
-    })),
-  },
-  {
-    label: 'Danbooru 标签 / Danbooru Tags',
-    options: DANBOORU_MODELS.map((m) => ({
-      value: `danbooru_prompt:${m.value}`,
-      label: `Danbooru ${m.label}`,
-    })),
-  },
-]
-
-// ─── 反推风格 / Reverse styles ───────────────────────────────────────────
-
-interface ReverseStyleOption {
-  value: string
-  label: string
-  desc: string
-}
-
-const REVERSE_STYLES: ReverseStyleOption[] = [
-  {
-    value: 'five_point',
-    label: '自然语言·五点结构式',
-    desc: '单段连贯自然语言，按五点结构(构图、主体、环境、文字、风格)极致还原画面，适用于Flux、MJ等自然语言提示词模型。',
-  },
-  {
-    value: 'multi_paragraph',
-    label: '自然语言·多段长描述',
-    desc: '2-5段自然语言长描述，无Markdown结构，支持角色名。2~5段自然语言，无Markdown小标题。',
-  },
-  {
-    value: 'short',
-    label: '自然语言·短描述',
-    desc: '简短扼要，覆盖主要对象与细节，无冗长修辞。短段落自然语言描述。',
-  },
-]
-
-// 解析反推目标值 → { skill, modelType } / parse target value
-function parseTarget(val: string): { skill: string; modelType: string } {
-  if (!val || val === 'reference') return { skill: '', modelType: '' }
-  const idx = val.indexOf(':')
-  if (idx < 0) return { skill: val, modelType: '' }
-  return { skill: val.slice(0, idx), modelType: val.slice(idx + 1) }
-}
-
-// 输出语言选项 / output language options
-const OUTPUT_LANGUAGES = [
-  { value: 'zh', label: '中文 / Chinese' },
-  { value: 'en', label: '英文 / English' },
-]
-
 const ReversePage: React.FC = () => {
+  const { t, language } = useI18n()
   const [fileList, setFileList] = useState<UploadFile[]>([])
   const [requirements, setRequirements] = useState('')
   const [reverseTarget, setReverseTarget] = useState('natural_prompt:krea2')
@@ -144,7 +76,7 @@ const ReversePage: React.FC = () => {
 
   const handleGenerate = async () => {
     if (fileList.length === 0) {
-      message.warning('请先上传图片 / Please upload images first')
+      message.warning(t('reverse.uploadFirst'))
       return
     }
 
@@ -161,11 +93,8 @@ const ReversePage: React.FC = () => {
       if (outputLanguage) formData.append('output_language', outputLanguage)
 
       // 按上传顺序记录 uid，后端按同一顺序逐图返回结果，用序号精确映射每张图的结果。
-      // 以 "uid+扩展名" 作为发送文件名仅用于唯一化，映射本身依赖顺序而非文件名回显，
-      // 从根本上避免文件名回显不一致导致的「结果不显示」问题。
       // / Record uids in upload order; the backend yields results in the same order,
-      // so we map the Nth streamed result to the Nth uid by index — no reliance on
-      // filename echo, which eliminates "result not shown" caused by filename mismatch.
+      // so we map the Nth streamed result to the Nth uid by index.
       const orderedUids: string[] = []
       fileList.forEach((file) => {
         if (file.originFileObj) {
@@ -184,22 +113,19 @@ const ReversePage: React.FC = () => {
         resultIndex += 1
         receivedCount += 1
         const text = item.error
-          ? `[错误 / Error: ${item.error}]`
+          ? `[${pick(language, '错误', 'Error')}: ${item.error}]`
           : (item.result || '')
         setResults((prev) => ({ ...prev, [uid]: text }))
       })
       // 流结束却一条结果都没收到，说明后端返回了空流（可能图片未被接收）。
-      // 显式提示，避免界面停留在「等待反推」而让用户误以为还在处理。
-      // / Stream ended with zero results — the backend returned an empty stream
-      // (likely images were not received). Surface it clearly instead of leaving
-      // the UI stuck on "Awaiting reverse".
+      // / Stream ended with zero results — the backend returned an empty stream.
       if (receivedCount === 0 && orderedUids.length > 0) {
-        message.warning('未收到任何反推结果，请检查图片是否已成功上传 / No reverse result received; check that images were uploaded')
+        message.warning(t('reverse.noResult'))
       } else {
-        message.success('提示词反推完成 / Prompt reverse complete')
+        message.success(t('reverse.done'))
       }
     } catch (err: any) {
-      message.error('请求失败 / Request failed: ' + (err.message || '未知错误'))
+      message.error(t('reverse.failed') + ': ' + (err.message || t('common.unknownError')))
     } finally {
       setLoading(false)
     }
@@ -207,50 +133,47 @@ const ReversePage: React.FC = () => {
 
   const copyPrompt = (text: string) => {
     navigator.clipboard.writeText(text)
-    message.success('已复制到剪贴板 / Copied to clipboard')
+    message.success(t('common.copied'))
   }
 
   return (
     <div>
-      <Title level={3}>提示词反推 / Prompt Reverse</Title>
-      <Text type="secondary">
-        上传多张图片，AI 为每张图片反推出适用于目标模型的高质量提示词
-        / Upload images; AI reverse-engineers a prompt for each image targeting the selected model.
-      </Text>
+      <Title level={3}>{t('reverse.title')}</Title>
+      <Text type="secondary">{t('reverse.description')}</Text>
 
       {/* 配置区 / Configuration */}
       <Row gutter={16} style={{ marginTop: 16 }}>
         <Col xs={24} md={6}>
-          <Card title="反推目标 / Reverse Target" size="small">
+          <Card title={t('reverse.target')} size="small">
             <Select
               value={reverseTarget}
               onChange={(val) => { setReverseTarget(val); setResults({}) }}
               style={{ width: '100%' }}
-              options={REVERSE_TARGET_OPTIONS}
+              options={getReverseTargetOptions(language)}
             />
           </Card>
         </Col>
         <Col xs={24} md={6}>
-          <Card title="提示词长度 / Prompt Length" size="small">
+          <Card title={t('reverse.length')} size="small">
             <InputNumber
               min={50} max={10000} step={1} precision={0}
               value={targetLength} onChange={(val) => setTargetLength(val)}
-              addonAfter="字符 / chars" style={{ width: '100%' }}
+              addonAfter={t('reverse.chars')} style={{ width: '100%' }}
             />
             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-              50–10000 字符 / characters
+              {t('reverse.lengthRange')}
             </Text>
           </Card>
         </Col>
         <Col xs={24} md={6}>
-          <Card title="反推提示词风格 / Reverse Style" size="small">
+          <Card title={t('reverse.style')} size="small">
             <Select
               value={reverseStyle}
               onChange={(val) => setReverseStyle(val)}
               style={{ width: '100%' }}
               optionLabelProp="label"
             >
-              {REVERSE_STYLES.map((s) => (
+              {getReverseStyles(language).map((s) => (
                 <Select.Option key={s.value} value={s.value} label={s.label}>
                   <div>
                     <div style={{ fontWeight: 500 }}>{s.label}</div>
@@ -262,12 +185,12 @@ const ReversePage: React.FC = () => {
           </Card>
         </Col>
         <Col xs={24} md={6}>
-          <Card title="输出语言 / Output Language" size="small">
+          <Card title={t('reverse.outputLanguage')} size="small">
             <Select
               value={outputLanguage}
               onChange={(val) => setOutputLanguage(val)}
               style={{ width: '100%' }}
-              options={OUTPUT_LANGUAGES}
+              options={getOutputLanguages(language)}
             />
           </Card>
         </Col>
@@ -284,23 +207,16 @@ const ReversePage: React.FC = () => {
           accept="image/*"
         >
           <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-          <p className="ant-upload-text">点击或拖拽图片到此区域上传 / Click or drag images here</p>
-          <p className="ant-upload-hint">支持多张图片 / Supports multiple images</p>
+          <p className="ant-upload-text">{t('reverse.uploadText')}</p>
+          <p className="ant-upload-hint">{t('reverse.uploadHint')}</p>
         </Dragger>
       </Card>
 
       {/* Requirements Input / 需求描述 */}
-      <Card style={{ marginTop: 16 }} title="反推需求描述 / Reverse Requirements (优先级最高 / Highest priority)">
+      <Card style={{ marginTop: 16 }} title={t('reverse.requirements')}>
         <TextArea
           rows={3}
-          placeholder={
-            '描述你对反推结果的要求，例如：\n' +
-            '- 重点关注的元素：人物表情/光影效果/构图等\n' +
-            '- 特殊要求：必须包含的文字、风格倾向等\n' +
-            '需求描述的优先级最高，与模型规范冲突时以此为准。\n\n' +
-            'Describe your requirements, e.g. key elements to focus on, required text, style preference...\n' +
-            'Your requirement has the highest priority and overrides the skill guide on conflict.'
-          }
+          placeholder={t('reverse.requirementsPlaceholder')}
           value={requirements}
           onChange={(e) => setRequirements(e.target.value)}
           maxLength={2000}
@@ -318,7 +234,7 @@ const ReversePage: React.FC = () => {
           loading={loading}
           disabled={fileList.length === 0}
         >
-          {loading ? '分析中... / Analyzing...' : '开始反推 / Start Reverse'}
+          {loading ? t('reverse.analyzing') : t('reverse.start')}
         </Button>
       </div>
 
@@ -353,10 +269,10 @@ const ReversePage: React.FC = () => {
                     <Space size={4}>
                       {hasResult && (
                         <Button size="small" icon={<CopyOutlined />} onClick={() => copyPrompt(res)}>
-                          复制 / Copy
+                          {t('common.copy')}
                         </Button>
                       )}
-                      <Tooltip title="删除此图片 / Delete this image">
+                      <Tooltip title={t('reverse.deleteImage')}>
                         <Button
                           size="small"
                           danger
@@ -381,7 +297,7 @@ const ReversePage: React.FC = () => {
                       {res}
                     </pre>
                   ) : (
-                    <Text type="secondary" style={{ fontSize: 12 }}>等待反推 / Awaiting reverse</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{t('reverse.awaiting')}</Text>
                   )}
                 </Card>
               </Col>

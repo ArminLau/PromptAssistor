@@ -3,14 +3,6 @@
  *
  * Minimax-H3 specific interactive prompt builder.
  * / Minimax-H3 专用交互式提示词构建器。
- *
- * Features / 功能:
- * - Target duration / 目标时长
- * - Reference materials with thumbnails / 参考素材（含缩略图）
- * - @ mention with thumbnail previews / @引用下拉（含缩略图）
- * - Visual material chips above input / 素材缩略图引用条
- * - Generate button / 生成按钮
- * - Large text output / 大文本输出框
  */
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
@@ -25,6 +17,7 @@ import {
 } from '@ant-design/icons'
 import type { UploadFile } from 'antd'
 import { expandApi } from '../services/api'
+import { useI18n, pick } from '../i18n'
 
 const { TextArea } = Input
 const { Title, Text } = Typography
@@ -130,69 +123,75 @@ const MaterialThumb: React.FC<{ material: MaterialRef; size?: number }> = ({ mat
 
 interface ModeOption {
   value: string
-  label: string
-  desc: string      // 简短描述 / Short description
-  inputs: string    // 所需输入 / Required inputs
+  label: string      // 中文 / Chinese
+  labelEn: string    // 英文 / English
+  desc: string
+  descEn: string
+  inputs: string
+  inputsEn: string
 }
 
 const GENERATION_MODES: ModeOption[] = [
-  { value: 'T2VA', label: 'T2VA — 文生视频 / Text to Video', desc: '纯文本构建完整视听时间线 / Build full audiovisual timeline from text', inputs: '仅文本 / Text only' },
-  { value: 'I2VA', label: 'I2VA — 图生视频 / Image to Video', desc: '从首帧图片出发向前发展 / Start from first frame and develop forward', inputs: '文本 + 1张首帧图 / Text + 1 first frame image' },
-  { value: 'FL2VA', label: 'FL2VA — 首尾帧生视频 / First-Last Frame', desc: '描述首帧到尾帧的连续变化路径 / Describe path between first and last frames', inputs: '文本 + 首帧图 + 尾帧图 / Text + first + last frame' },
-  { value: 'L2VA', label: 'L2VA — 尾帧生视频 / Last Frame to Video', desc: '推断开头并逐渐收敛到尾帧 / Infer opening and converge to last frame', inputs: '文本 + 1张尾帧图 / Text + 1 last frame image' },
-  { value: 'Ref2VA', label: 'Ref2VA — 全参考生视频 / Full Reference', desc: '多图+视频+音频全模态参考 / Multi-modal reference generation', inputs: '文本+图(≤9)+视频(≤3)+音频(≤3) / Text+Img(≤9)+Vid(≤3)+Aud(≤3)' },
+  { value: 'T2VA', label: 'T2VA — 文生视频', labelEn: 'T2VA — Text to Video', desc: '纯文本构建完整视听时间线', descEn: 'Build full audiovisual timeline from text', inputs: '仅文本', inputsEn: 'Text only' },
+  { value: 'I2VA', label: 'I2VA — 图生视频', labelEn: 'I2VA — Image to Video', desc: '从首帧图片出发向前发展', descEn: 'Start from first frame and develop forward', inputs: '文本 + 1张首帧图', inputsEn: 'Text + 1 first frame image' },
+  { value: 'FL2VA', label: 'FL2VA — 首尾帧生视频', labelEn: 'FL2VA — First-Last Frame', desc: '描述首帧到尾帧的连续变化路径', descEn: 'Describe path between first and last frames', inputs: '文本 + 首帧图 + 尾帧图', inputsEn: 'Text + first + last frame' },
+  { value: 'L2VA', label: 'L2VA — 尾帧生视频', labelEn: 'L2VA — Last Frame to Video', desc: '推断开头并逐渐收敛到尾帧', descEn: 'Infer opening and converge to last frame', inputs: '文本 + 1张尾帧图', inputsEn: 'Text + 1 last frame image' },
+  { value: 'Ref2VA', label: 'Ref2VA — 全参考生视频', labelEn: 'Ref2VA — Full Reference', desc: '多图+视频+音频全模态参考', descEn: 'Multi-modal reference generation', inputs: '文本+图(≤9)+视频(≤3)+音频(≤3)', inputsEn: 'Text+Img(≤9)+Vid(≤3)+Aud(≤3)' },
 ]
 
 // ─── Visual Style Options / 视觉风格选项 ───────────────────────────────
 
 interface StyleOption {
   value: string
-  label: string
-  enLabel: string
-  category: string  // 分类 / Category
+  label: string      // 中文 / Chinese
+  labelEn: string    // 英文 / English
+  category: string   // 分类（中文）/ Category (Chinese)
+  categoryEn: string // 分类（英文）/ Category (English)
+  enLabel: string    // 英文提示词文本 / English prompt text
 }
 
 const VISUAL_STYLES: StyleOption[] = [
   // 写实类 / Realistic
-  { value: 'Cinematic, live-action, film look', label: '电影写实 / Cinematic Live-Action', enLabel: 'Cinematic, live-action, film look', category: '写实 / Realistic' },
-  { value: 'Vintage film, 16mm, retro look', label: '复古胶片 / Vintage Film', enLabel: 'Vintage film, 16mm, retro look', category: '写实 / Realistic' },
-  { value: 'Documentary, handheld, natural light', label: '纪录片风格 / Documentary', enLabel: 'Documentary, handheld, natural light', category: '写实 / Realistic' },
+  { value: 'Cinematic, live-action, film look', label: '电影写实', labelEn: 'Cinematic Live-Action', category: '写实', categoryEn: 'Realistic', enLabel: 'Cinematic, live-action, film look' },
+  { value: 'Vintage film, 16mm, retro look', label: '复古胶片', labelEn: 'Vintage Film', category: '写实', categoryEn: 'Realistic', enLabel: 'Vintage film, 16mm, retro look' },
+  { value: 'Documentary, handheld, natural light', label: '纪录片风格', labelEn: 'Documentary', category: '写实', categoryEn: 'Realistic', enLabel: 'Documentary, handheld, natural light' },
 
   // 3D类 / 3D
-  { value: '3D CG, Pixar-inspired, Octane render, cartoon rendering', label: '3D动画(皮克斯风) / 3D CG Pixar-style', enLabel: '3D CG, Pixar-inspired, Octane render, cartoon rendering', category: '3D / CG' },
-  { value: '3D CG, photorealistic render, Unreal Engine 5 quality', label: '3D写实渲染 / 3D Photorealistic', enLabel: '3D CG, photorealistic render, unreal engine quality', category: '3D / CG' },
-  { value: '3D CG, minimalist product render, clean studio lighting', label: '3D产品渲染 / 3D Product Render', enLabel: '3D CG, minimalist product render, clean studio lighting', category: '3D / CG' },
+  { value: '3D CG, Pixar-inspired, Octane render, cartoon rendering', label: '3D动画(皮克斯风)', labelEn: '3D CG Pixar-style', category: '3D / CG', categoryEn: '3D / CG', enLabel: '3D CG, Pixar-inspired, Octane render, cartoon rendering' },
+  { value: '3D CG, photorealistic render, Unreal Engine 5 quality', label: '3D写实渲染', labelEn: '3D Photorealistic', category: '3D / CG', categoryEn: '3D / CG', enLabel: '3D CG, photorealistic render, unreal engine quality' },
+  { value: '3D CG, minimalist product render, clean studio lighting', label: '3D产品渲染', labelEn: '3D Product Render', category: '3D / CG', categoryEn: '3D / CG', enLabel: '3D CG, minimalist product render, clean studio lighting' },
 
   // 2D类 / 2D
-  { value: '2D-animated, hand-drawn animation, cel animation', label: '2D手绘动画 / 2D Hand-Drawn', enLabel: '2D-animated, hand-drawn animation, cel animation', category: '2D / 手绘' },
-  { value: 'Anime style, Japanese animation, vibrant colors', label: '日式动画 / Anime Style', enLabel: 'Anime style, Japanese animation, vibrant colors', category: '2D / 手绘' },
-  { value: 'Watercolor style, hand-painted look, soft brushstrokes', label: '水彩手绘 / Watercolor', enLabel: 'Watercolor style, hand-painted look, soft brushstrokes', category: '2D / 手绘' },
-  { value: 'Ink wash painting, sumi-e style, traditional Chinese art', label: '水墨画 / Ink Wash Painting', enLabel: 'Ink wash painting, sumi-e style, traditional Chinese art', category: '2D / 手绘' },
+  { value: '2D-animated, hand-drawn animation, cel animation', label: '2D手绘动画', labelEn: '2D Hand-Drawn', category: '2D / 手绘', categoryEn: '2D / Hand-Drawn', enLabel: '2D-animated, hand-drawn animation, cel animation' },
+  { value: 'Anime style, Japanese animation, vibrant colors', label: '日式动画', labelEn: 'Anime Style', category: '2D / 手绘', categoryEn: '2D / Hand-Drawn', enLabel: 'Anime style, Japanese animation, vibrant colors' },
+  { value: 'Watercolor style, hand-painted look, soft brushstrokes', label: '水彩手绘', labelEn: 'Watercolor', category: '2D / 手绘', categoryEn: '2D / Hand-Drawn', enLabel: 'Watercolor style, hand-painted look, soft brushstrokes' },
+  { value: 'Ink wash painting, sumi-e style, traditional Chinese art', label: '水墨画', labelEn: 'Ink Wash Painting', category: '2D / 手绘', categoryEn: '2D / Hand-Drawn', enLabel: 'Ink wash painting, sumi-e style, traditional Chinese art' },
 
   // 定格动画类 / Stop-Motion
-  { value: 'Stop-motion, claymation, textured handmade feel', label: '黏土定格 / Claymation', enLabel: 'Stop-motion, claymation, textured handmade feel', category: '定格 / Stop-Motion' },
-  { value: 'Papercraft stop-motion, layered diorama, cut-paper style', label: '纸艺定格 / Papercraft Stop-Motion', enLabel: 'Papercraft stop-motion, layered diorama, cut-paper style', category: '定格 / Stop-Motion' },
-  { value: 'Paper collage, mixed media, tactile halftone texture', label: '拼贴画风 / Paper Collage', enLabel: 'Paper collage, mixed media, tactile halftone texture', category: '定格 / Stop-Motion' },
+  { value: 'Stop-motion, claymation, textured handmade feel', label: '黏土定格', labelEn: 'Claymation', category: '定格', categoryEn: 'Stop-Motion', enLabel: 'Stop-motion, claymation, textured handmade feel' },
+  { value: 'Papercraft stop-motion, layered diorama, cut-paper style', label: '纸艺定格', labelEn: 'Papercraft Stop-Motion', category: '定格', categoryEn: 'Stop-Motion', enLabel: 'Papercraft stop-motion, layered diorama, cut-paper style' },
+  { value: 'Paper collage, mixed media, tactile halftone texture', label: '拼贴画风', labelEn: 'Paper Collage', category: '定格', categoryEn: 'Stop-Motion', enLabel: 'Paper collage, mixed media, tactile halftone texture' },
 
   // 特殊效果类 / Special Effects
-  { value: 'Hand-drawn animation overlaying live-action, rough glowing lines', label: '手绘叠加实拍 / Hand-Drawn on Live-Action', enLabel: 'Hand-drawn animation overlaying live-action, rough glowing lines', category: '特效 / Effects' },
-  { value: 'Product photography, commercial, clean minimal, Scandinavian design', label: '极简产品广告 / Minimalist Product', enLabel: 'Product photography, commercial, clean minimal', category: '商业 / Commercial' },
-  { value: 'Cyberpunk, neon lights, rain-soaked streets, high contrast', label: '赛博朋克 / Cyberpunk', enLabel: 'Cyberpunk, neon lights, rain-soaked streets, high contrast', category: '特效 / Effects' },
+  { value: 'Hand-drawn animation overlaying live-action, rough glowing lines', label: '手绘叠加实拍', labelEn: 'Hand-Drawn on Live-Action', category: '特效', categoryEn: 'Effects', enLabel: 'Hand-drawn animation overlaying live-action, rough glowing lines' },
+  { value: 'Product photography, commercial, clean minimal, Scandinavian design', label: '极简产品广告', labelEn: 'Minimalist Product', category: '商业', categoryEn: 'Commercial', enLabel: 'Product photography, commercial, clean minimal' },
+  { value: 'Cyberpunk, neon lights, rain-soaked streets, high contrast', label: '赛博朋克', labelEn: 'Cyberpunk', category: '特效', categoryEn: 'Effects', enLabel: 'Cyberpunk, neon lights, rain-soaked streets, high contrast' },
 ]
 
 // ─── Expansion Types / 扩写类型 ────────────────────────────────────────
 
 interface ExpansionTypeOption {
   value: string
-  label: string
+  label: string      // 中文 / Chinese
+  labelEn: string    // 英文 / English
   skill: string      // 目标 skill / target skill name
   imageOnly: boolean // 是否仅支持图片参考素材 / image-only reference materials
 }
 
 const EXPANSION_TYPES: ExpansionTypeOption[] = [
-  { value: 'natural_language', label: '自然语言 / Natural Language', skill: 'natural_prompt', imageOnly: true },
-  { value: 'danbooru', label: 'Danbooru标签 / Danbooru Tags', skill: 'danbooru_prompt', imageOnly: true },
-  { value: 'minimax_h3', label: 'Minimax-H3', skill: 'minimax_h3', imageOnly: false },
+  { value: 'natural_language', label: '自然语言', labelEn: 'Natural Language', skill: 'natural_prompt', imageOnly: true },
+  { value: 'danbooru', label: 'Danbooru标签', labelEn: 'Danbooru Tags', skill: 'danbooru_prompt', imageOnly: true },
+  { value: 'minimax_h3', label: 'Minimax-H3', labelEn: 'Minimax-H3', skill: 'minimax_h3', imageOnly: false },
 ]
 
 // 自然语言模型类型 / Natural language model types
@@ -209,15 +208,10 @@ const DANBOORU_MODELS = [
   { value: 'sdxl', label: 'SDXL' },
 ]
 
-// 输出语言选项 / output language options
-const OUTPUT_LANGUAGES = [
-  { value: 'zh', label: '中文 / Chinese' },
-  { value: 'en', label: '英文 / English' },
-]
-
 // ─── Component / 组件 ───────────────────────────────────────────────────
 
 const ExpandPage: React.FC = () => {
+  const { t, language } = useI18n()
   const [duration, setDuration] = useState<number | null>(5)
   const [genMode, setGenMode] = useState<string>('T2VA')                // H3生成模式 / Generation mode
   const [visualStyle, setVisualStyle] = useState<string>('')            // 视觉风格 / Visual style
@@ -234,6 +228,12 @@ const ExpandPage: React.FC = () => {
   const [modelType, setModelType] = useState<string>('flux')                 // 模型类型 / model type
   const [targetLength, setTargetLength] = useState<number | null>(500)       // 扩写长度(字符) / target length
   const [outputLanguage, setOutputLanguage] = useState<string>('zh')         // 输出语言 / output language
+
+  // 输出语言选项（按当前界面语言）/ output language options (localized)
+  const outputLanguageOptions = [
+    { value: 'zh', label: t('options.outputZh') },
+    { value: 'en', label: t('options.outputEn') },
+  ]
 
   // Cleanup preview URLs on unmount / 卸载时清理Object URL
   useEffect(() => {
@@ -267,8 +267,9 @@ const ExpandPage: React.FC = () => {
     setMaterials(newMaterials)
     setUploadFiles(files)
 
-    message.success(`已加载 ${newMaterials.length} 个素材 / ${newMaterials.length} material(s) loaded`)
-  }, [])
+    message.success(t('expand.materialsLoaded').replace('{n}', String(newMaterials.length)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materials])
 
   // ── Handle clearing materials / 清空素材 ───────────────────────────
   const handleClearMaterials = () => {
@@ -279,8 +280,6 @@ const ExpandPage: React.FC = () => {
   }
 
   // ── Handle removing a single material / 删除单个素材 ───────────────
-  // 同时从 materials 与 Dragger 的 uploadFiles 中移除，并回收预览 URL。
-  // / Remove from both materials and the Dragger's uploadFiles, and revoke the preview URL.
   const handleRemoveMaterial = (id: string) => {
     const target = materials.find(m => m.id === id)
     if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
@@ -327,7 +326,6 @@ const ExpandPage: React.FC = () => {
       const cursorPos = textArea.selectionStart || description.length
       const newText = description.slice(0, cursorPos) + material.id + ' ' + description.slice(cursorPos)
       setDescription(newText)
-      // Focus back and move cursor / 恢复焦点和光标位置
       setTimeout(() => {
         textArea.focus()
         const newPos = cursorPos + material.id.length + 1
@@ -362,13 +360,11 @@ const ExpandPage: React.FC = () => {
   // ── Generate / 生成 ────────────────────────────────────────────────
   const handleGenerate = async () => {
     if (!description.trim()) {
-      message.warning('请输入需求描述 / Please enter requirement description')
+      message.warning(t('expand.needDescription'))
       return
     }
     setLoading(true)
     try {
-      // 将参考图片读取为 base64 数据URL，随 JSON 发送，使模型能"看到"图片内容
-      // Read reference images as base64 data URLs and send them with JSON, so the model can "see" them
       const images: string[] = []
       for (const m of materials) {
         if (m.type !== 'image') continue
@@ -376,7 +372,6 @@ const ExpandPage: React.FC = () => {
         if (origin) images.push(await fileToDataUrl(origin))
       }
 
-      // 按扩写类型组装请求 payload / Build request payload by expansion type
       const option = EXPANSION_TYPES.find(t => t.value === expansionType)
       const payload: Parameters<typeof expandApi.generate>[0] = {
         expansion_type: expansionType,
@@ -397,12 +392,12 @@ const ExpandPage: React.FC = () => {
       const response = await expandApi.generate(payload)
       if (response.data.success) {
         setResult(response.data.result || '')
-        message.success('提示词生成完成 / Prompt generation complete')
+        message.success(t('expand.done'))
       } else {
-        message.error(response.data.error || '生成失败 / Generation failed')
+        message.error(response.data.error || t('expand.generationFailed'))
       }
     } catch (err: any) {
-      message.error('请求失败 / Request failed: ' + (err.message || '未知错误'))
+      message.error(t('expand.requestFailed') + ': ' + (err.message || t('common.unknownError')))
     } finally {
       setLoading(false)
     }
@@ -411,7 +406,7 @@ const ExpandPage: React.FC = () => {
   const handleCopy = () => {
     navigator.clipboard.writeText(result)
     setCopied(true)
-    message.success('已复制 / Copied')
+    message.success(t('expand.copied'))
     setTimeout(() => setCopied(false), 2000)
   }
 
@@ -436,29 +431,26 @@ const ExpandPage: React.FC = () => {
   // ── Render / 渲染 ──────────────────────────────────────────────────
   return (
     <div>
-      <Title level={3}>提示词扩写 / Prompt Expansion</Title>
-      <Text type="secondary">
-        为不同目标模型生成专业提示词 — 选择扩写类型，配置参考素材与需求，生成专业提示词
-        / Generate professional prompts for different target models — pick an expansion type.
-      </Text>
+      <Title level={3}>{t('expand.title')}</Title>
+      <Text type="secondary">{t('expand.description')}</Text>
 
       {/* 扩写类型 / Expansion Type */}
-      <Card title="扩写类型 / Expansion Type" size="small" style={{ marginTop: 16 }}>
+      <Card title={t('expand.type')} size="small" style={{ marginTop: 16 }}>
         <Select
           value={expansionType}
           onChange={handleTypeChange}
           style={{ width: '100%' }}
-          options={EXPANSION_TYPES.map(t => ({ value: t.value, label: t.label }))}
+          options={EXPANSION_TYPES.map(t => ({ value: t.value, label: pick(language, t.label, t.labelEn) }))}
         />
       </Card>
 
       {/* 输出语言 / Output Language */}
-      <Card title="输出语言 / Output Language" size="small" style={{ marginTop: 12 }}>
+      <Card title={t('expand.outputLanguage')} size="small" style={{ marginTop: 12 }}>
         <Select
           value={outputLanguage}
           onChange={(val) => setOutputLanguage(val)}
           style={{ width: 240 }}
-          options={OUTPUT_LANGUAGES}
+          options={outputLanguageOptions}
         />
       </Card>
 
@@ -468,18 +460,18 @@ const ExpandPage: React.FC = () => {
           {expansionType === 'minimax_h3' ? (
             <>
           {/* (1) Target Duration */}
-          <Card title="目标时长 / Target Duration" size="small">
+          <Card title={t('expand.duration')} size="small">
             <Space>
               <InputNumber min={1} max={120} step={1} precision={0}
                 value={duration} onChange={(val) => setDuration(val)}
-                addonAfter="秒 / seconds" style={{ width: 180 }}
+                addonAfter={t('expand.seconds')} style={{ width: 180 }}
               />
-              <Text type="secondary">正整数 / Positive integer</Text>
+              <Text type="secondary">{t('expand.positiveInteger')}</Text>
             </Space>
           </Card>
 
           {/* (1.5) H3 Generation Mode / H3生成模式 */}
-          <Card title="生成模式 / Generation Mode" size="small" style={{ marginTop: 12 }}>
+          <Card title={t('expand.mode')} size="small" style={{ marginTop: 12 }}>
             <Select
               value={genMode}
               onChange={(val) => setGenMode(val)}
@@ -487,12 +479,12 @@ const ExpandPage: React.FC = () => {
               optionLabelProp="label"
             >
               {GENERATION_MODES.map((mode) => (
-                <Select.Option key={mode.value} value={mode.value} label={mode.label}>
+                <Select.Option key={mode.value} value={mode.value} label={pick(language, mode.label, mode.labelEn)}>
                   <div>
-                    <div style={{ fontWeight: 500 }}>{mode.label}</div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>{mode.desc}</Text>
+                    <div style={{ fontWeight: 500 }}>{pick(language, mode.label, mode.labelEn)}</div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{pick(language, mode.desc, mode.descEn)}</Text>
                     <br />
-                    <Tag style={{ marginTop: 2, fontSize: 10 }}>{mode.inputs}</Tag>
+                    <Tag style={{ marginTop: 2, fontSize: 10 }}>{pick(language, mode.inputs, mode.inputsEn)}</Tag>
                   </div>
                 </Select.Option>
               ))}
@@ -500,20 +492,20 @@ const ExpandPage: React.FC = () => {
           </Card>
 
           {/* (1.6) Visual Style / 视觉风格 */}
-          <Card title="视觉风格 / Visual Style" size="small" style={{ marginTop: 12 }}>
+          <Card title={t('expand.style')} size="small" style={{ marginTop: 12 }}>
             <Select
               value={visualStyle}
               onChange={(val) => setVisualStyle(val)}
               style={{ width: '100%' }}
               allowClear
-              placeholder="不指定风格 / No specific style"
+              placeholder={t('expand.noStyle')}
               showSearch
               optionFilterProp="label"
               options={[
-                { value: '', label: '不指定(由AI决定) / Auto (AI decides)' },
+                { value: '', label: t('expand.noStyle') },
                 ...VISUAL_STYLES.map((s) => ({
                   value: s.value,
-                  label: s.label,
+                  label: pick(language, s.label, s.labelEn),
                 })),
               ]}
               optionRender={(option) => {
@@ -521,9 +513,9 @@ const ExpandPage: React.FC = () => {
                 if (!style) return <div style={{ fontWeight: 500, color: '#888' }}>{option.label}</div>
                 return (
                   <div>
-                    <div style={{ fontWeight: 500 }}>{style.label}</div>
+                    <div style={{ fontWeight: 500 }}>{pick(language, style.label, style.labelEn)}</div>
                     <Space size={4}>
-                      <Tag color="blue" style={{ fontSize: 10 }}>{style.category}</Tag>
+                      <Tag color="blue" style={{ fontSize: 10 }}>{pick(language, style.category, style.categoryEn)}</Tag>
                       <Text type="secondary" style={{ fontSize: 11 }}>{style.enLabel}</Text>
                     </Space>
                   </div>
@@ -535,7 +527,7 @@ const ExpandPage: React.FC = () => {
         ) : (
           <>
             {/* 模型类型 / Model Type */}
-            <Card title="模型类型 / Model Type" size="small">
+            <Card title={t('expand.modelType')} size="small">
               <Select
                 value={modelType}
                 onChange={(val) => setModelType(val)}
@@ -548,13 +540,13 @@ const ExpandPage: React.FC = () => {
             </Card>
 
             {/* 扩写长度 / Target Length */}
-            <Card title="扩写长度 / Target Length" size="small" style={{ marginTop: 12 }}>
+            <Card title={t('expand.targetLength')} size="small" style={{ marginTop: 12 }}>
               <Space>
                 <InputNumber min={50} max={10000} step={1} precision={0}
                   value={targetLength} onChange={(val) => setTargetLength(val)}
-                  addonAfter="字符 / chars" style={{ width: 180 }}
+                  addonAfter={t('expand.chars')} style={{ width: 180 }}
                 />
-                <Text type="secondary">50–10000 字符 / characters</Text>
+                <Text type="secondary">{t('expand.lengthRange')}</Text>
               </Space>
             </Card>
           </>
@@ -562,11 +554,11 @@ const ExpandPage: React.FC = () => {
 
           {/* (2) Reference Materials with Thumbnails */}
           <Card
-            title={<Space>参考素材 / Reference Materials{materials.length > 0 && <Tag color="green">{materials.length} 个</Tag>}</Space>}
+            title={<Space>{t('expand.materials')}{materials.length > 0 && <Tag color="green">{materials.length} {t('expand.materialsCount')}</Tag>}</Space>}
             size="small" style={{ marginTop: 12 }}
             extra={materials.length > 0 ? (
               <Button size="small" danger icon={<DeleteOutlined />} onClick={handleClearMaterials}>
-                清空 / Clear
+                {t('expand.clear')}
               </Button>
             ) : null}
           >
@@ -576,9 +568,9 @@ const ExpandPage: React.FC = () => {
               showUploadList={false} style={{ padding: '12px 0' }}
             >
               <p className="ant-upload-drag-icon"><InboxOutlined style={{ fontSize: 28 }} /></p>
-              <p className="ant-upload-text">点击或拖拽素材 / Click or drag materials</p>
+              <p className="ant-upload-text">{t('expand.uploadText')}</p>
               <p className="ant-upload-hint">
-                {expansionType === 'minimax_h3' ? '图片/视频/音频 — 按上传顺序自动打标签' : '仅图片 — 按上传顺序自动打标签'}
+                {expansionType === 'minimax_h3' ? t('expand.uploadHintH3') : t('expand.uploadHintImage')}
               </p>
             </Dragger>
 
@@ -586,13 +578,13 @@ const ExpandPage: React.FC = () => {
             {materials.length > 0 && (
               <div style={{ marginTop: 12 }}>
                 <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-                  已加载素材 / Loaded materials (点击缩略图可插入引用 / click to insert reference):
+                  {t('expand.loadedMaterials')}
                 </Text>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                   {materials.map((m) => (
                     <div key={m.id} style={{ position: 'relative' }}>
                       <Tooltip
-                        title={`${m.id} — ${m.fileName}\n点击插入引用 / Click to insert reference`}
+                        title={`${m.id} — ${m.fileName}\n${t('expand.clickToInsert')}`}
                         placement="top"
                       >
                         <div
@@ -609,7 +601,7 @@ const ExpandPage: React.FC = () => {
                         </div>
                       </Tooltip>
                       {/* 右上角删除按钮 / top-right delete button */}
-                      <Tooltip title="删除此素材 / Delete this material">
+                      <Tooltip title={t('expand.deleteMaterial')}>
                         <Button
                           size="small"
                           danger
@@ -636,9 +628,9 @@ const ExpandPage: React.FC = () => {
         <Col xs={24} lg={14}>
           {/* (3) Material Reference Chips Bar + Requirement Input */}
           <Card
-            title="需求描述 / Requirement Description"
+            title={t('expand.requirements')}
             size="small"
-            extra={<Text type="secondary" style={{ fontSize: 12 }}>输入 @ 引用素材 / Type @ to reference</Text>}
+            extra={<Text type="secondary" style={{ fontSize: 12 }}>{t('expand.mentionHint')}</Text>}
           >
             {/* Material Reference Chips — visual thumbnails above input */}
             {materials.length > 0 && (
@@ -647,10 +639,10 @@ const ExpandPage: React.FC = () => {
                 background: '#fafafa', borderRadius: 8, marginBottom: 10,
                 border: '1px dashed #e0e0e0', alignItems: 'center',
               }}>
-                <Text type="secondary" style={{ fontSize: 12, marginRight: 4 }}>素材 / Materials:</Text>
+                <Text type="secondary" style={{ fontSize: 12, marginRight: 4 }}>{t('expand.materialsLabel')}:</Text>
                 {materials.map((m) => (
                   <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Tooltip title={`${m.id} — ${m.fileName}\n点击插入 / Click to insert`}>
+                    <Tooltip title={`${m.id} — ${m.fileName}\n${t('expand.clickToInsertShort')}`}>
                       <div onClick={() => handleChipClick(m)}
                         style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
                           background: '#fff', borderRadius: 6, padding: '3px 8px 3px 4px',
@@ -663,7 +655,7 @@ const ExpandPage: React.FC = () => {
                         <Text style={{ fontSize: 12, fontWeight: 500, color: '#333' }}>{m.id}</Text>
                       </div>
                     </Tooltip>
-                    <Tooltip title="删除此素材 / Delete this material">
+                    <Tooltip title={t('expand.deleteMaterial')}>
                       <Button
                         size="small" danger type="text" icon={<DeleteOutlined />}
                         onClick={() => handleRemoveMaterial(m.id)}
@@ -680,14 +672,8 @@ const ExpandPage: React.FC = () => {
               <TextArea ref={textAreaRef} rows={6}
                 placeholder={
                   expansionType === 'minimax_h3'
-                    ? '描述你的需求，使用 @ 引用参考素材。例如：\n' +
-                      '"使用 <Picture 1> 中的构图风格，结合 <Video 1> 的色彩调性，\n生成一段时长为 ' + (duration || 5) + ' 秒的视频提示词。\n' +
-                      '画面需要表达..."\n\n' +
-                      'Describe your needs. Use @ to reference materials.\n' +
-                      'e.g., "Use the composition from <Picture 1>..."'
-                    : '描述你的需求，使用 @ 引用参考图片。例如：\n' +
-                      '"使用 <Picture 1> 中的构图与风格，生成一张..."\n\n' +
-                      'Describe your needs. Use @ to reference images.'
+                    ? t('expand.requirementsPlaceholderH3').replace('{duration}', String(duration || 5))
+                    : t('expand.requirementsPlaceholderImage')
                 }
                 value={description} onChange={handleInputChange}
                 maxLength={5000} showCount
@@ -702,7 +688,7 @@ const ExpandPage: React.FC = () => {
                   maxHeight: 260, overflow: 'auto', minWidth: 300, padding: 4,
                 }}>
                   <div style={{ padding: '4px 2px 6px 8px', fontSize: 11, color: '#aaa', borderBottom: '1px solid #f0f0f0', marginBottom: 4 }}>
-                    选择素材引用 / Select material to reference:
+                    {t('expand.selectMaterial')}
                   </div>
                   {filteredMaterials.map((m) => (
                     <div key={m.id} onClick={() => handleMentionSelect(m)}
@@ -731,7 +717,7 @@ const ExpandPage: React.FC = () => {
                   ))}
                   {filteredMaterials.length === 0 && (
                     <div style={{ padding: '12px 16px', color: '#999', fontSize: 13, textAlign: 'center' }}>
-                      无匹配素材 / No matching materials
+                      {t('expand.noMatch')}
                     </div>
                   )}
                 </div>
@@ -744,18 +730,18 @@ const ExpandPage: React.FC = () => {
             <Button type="primary" size="large" icon={<ThunderboltOutlined />}
               onClick={handleGenerate} loading={loading} disabled={!description.trim()}
             >
-              {loading ? '生成中... / Generating...' : '生成提示词 / Generate Prompt'}
+              {loading ? t('expand.generating') : t('expand.generate')}
             </Button>
           </div>
         </Col>
       </Row>
 
       {/* (5) Output Area */}
-      <Card title="生成结果 / Generated Prompt" style={{ marginTop: 16 }}
+      <Card title={t('expand.result')} style={{ marginTop: 16 }}
         extra={result ? (
           <Button icon={<CopyOutlined />} onClick={handleCopy}
             type={copied ? 'primary' : 'default'}>
-            {copied ? '已复制 / Copied' : '复制 / Copy'}
+            {copied ? t('expand.copied') : t('common.copy')}
           </Button>
         ) : null}
       >
@@ -770,8 +756,7 @@ const ExpandPage: React.FC = () => {
           <div style={{ minHeight: 200, display: 'flex', alignItems: 'center',
             justifyContent: 'center', color: '#bbb', fontSize: 14,
             background: '#fafafa', borderRadius: 8 }}>
-            上传参考素材并填写需求描述后，点击"生成提示词"按钮
-            / Upload materials, describe your needs, then click "Generate Prompt"
+            {t('expand.emptyResult')}
           </div>
         )}
       </Card>
