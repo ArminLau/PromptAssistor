@@ -16,7 +16,7 @@ import {
   DeleteOutlined, PaperClipOutlined,
 } from '@ant-design/icons'
 import type { UploadFile } from 'antd'
-import { expandApi } from '../services/api'
+import { expandApi, configApi, type SegmentResult } from '../services/api'
 import { useI18n, pick } from '../i18n'
 
 const { TextArea } = Input
@@ -213,6 +213,7 @@ const DANBOORU_MODELS = [
 const ExpandPage: React.FC = () => {
   const { t, language } = useI18n()
   const [duration, setDuration] = useState<number | null>(5)
+  const [segmentDuration, setSegmentDuration] = useState<number | null>(null)  // 分段时长，null=跟随目标时长 / segment duration, null = follow target
   const [genMode, setGenMode] = useState<string>('T2VA')                // H3生成模式 / Generation mode
   const [visualStyle, setVisualStyle] = useState<string>('')            // 视觉风格 / Visual style
   const [materials, setMaterials] = useState<MaterialRef[]>([])
@@ -222,8 +223,10 @@ const ExpandPage: React.FC = () => {
   const [showMention, setShowMention] = useState(false)
   const [mentionFilter, setMentionFilter] = useState('')
   const [result, setResult] = useState('')
+  const [segments, setSegments] = useState<SegmentResult[]>([])
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [copiedAll, setCopiedAll] = useState(false)
   const [expansionType, setExpansionType] = useState<string>('minimax_h3')   // 扩写类型 / expansion type
   const [modelType, setModelType] = useState<string>('flux')                 // 模型类型 / model type
   const [targetLength, setTargetLength] = useState<number | null>(500)       // 扩写长度(字符) / target length
@@ -241,6 +244,16 @@ const ExpandPage: React.FC = () => {
       materials.forEach(m => { if (m.previewUrl) URL.revokeObjectURL(m.previewUrl) })
     }
   }, [materials])
+
+  // 挂载时读取已持久化的分段时长 / load persisted segment duration on mount
+  useEffect(() => {
+    let cancelled = false
+    configApi.get().then((res) => {
+      const seg = res.data?.features?.expand?.segment_duration
+      if (!cancelled && typeof seg === 'number' && seg > 0) setSegmentDuration(seg)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   // ── Handle material upload / 处理素材上传 ──────────────────────────
   const handleMaterialUpload = useCallback((files: UploadFile[]) => {
@@ -293,6 +306,7 @@ const ExpandPage: React.FC = () => {
   const handleTypeChange = (val: string) => {
     setExpansionType(val)
     setResult('')
+    setSegments([])
     const option = EXPANSION_TYPES.find(t => t.value === val)
     // 切换到仅图片类型时，清空可能残留的视频/音频素材 / clear video/audio materials when switching to image-only type
     if (option?.imageOnly && materials.some(m => m.type !== 'image')) {
@@ -300,6 +314,14 @@ const ExpandPage: React.FC = () => {
     }
     // 重置模型类型为该类型默认项 / reset model type to the type's default
     setModelType(val === 'danbooru' ? 'anima' : 'flux')
+  }
+
+  // ── Handle segment duration change / 处理分段时长变更 ─────────────
+  const handleSegmentChange = (val: number | null) => {
+    setSegmentDuration(val)
+    // 持久化分段时长（清空则存 null 回到「跟随目标时长」）
+    // / persist segment duration (null = back to follow target)
+    configApi.update({ 'features.expand.segment_duration': val ?? null }).catch(() => {})
   }
 
   // ── Handle @ mention trigger / 处理@引用触发 ────────────────────────
@@ -364,6 +386,7 @@ const ExpandPage: React.FC = () => {
       return
     }
     setLoading(true)
+    setSegments([])
     try {
       const images: string[] = []
       for (const m of materials) {
@@ -382,6 +405,7 @@ const ExpandPage: React.FC = () => {
       }
       if (expansionType === 'minimax_h3') {
         payload.target_duration = duration || 5
+        payload.segment_duration = segmentDuration
         payload.generation_mode = genMode
         payload.visual_style = visualStyle || ''
       } else {
@@ -392,6 +416,7 @@ const ExpandPage: React.FC = () => {
       const response = await expandApi.generate(payload)
       if (response.data.success) {
         setResult(response.data.result || '')
+        setSegments(response.data.segments || [])
         message.success(t('expand.done'))
       } else {
         message.error(response.data.error || t('expand.generationFailed'))
@@ -408,6 +433,26 @@ const ExpandPage: React.FC = () => {
     setCopied(true)
     message.success(t('expand.copied'))
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  // 复制单个分段提示词 / copy a single segment prompt
+  const copySegment = (text: string) => {
+    navigator.clipboard.writeText(text)
+    message.success(t('expand.copied'))
+  }
+
+  // 一键拷贝所有分段提示词 / copy all segment prompts at once
+  const copyAllSegments = () => {
+    const text = segments.map((seg) => {
+      const header = t('expand.copyAllHeader')
+        .replace('{index}', String(seg.index))
+        .replace('{duration}', String(seg.duration))
+      return `${header}\n${seg.content}`
+    }).join('\n\n')
+    navigator.clipboard.writeText(text)
+    setCopiedAll(true)
+    message.success(t('expand.copied'))
+    setTimeout(() => setCopiedAll(false), 2000)
   }
 
   // ── Material type color / 素材类型颜色 ──────────────────────────────
@@ -459,14 +504,26 @@ const ExpandPage: React.FC = () => {
         <Col xs={24} lg={10}>
           {expansionType === 'minimax_h3' ? (
             <>
-          {/* (1) Target Duration */}
+          {/* (1) Target Duration + Segment Duration */}
           <Card title={t('expand.duration')} size="small">
-            <Space>
-              <InputNumber min={1} max={120} step={1} precision={0}
-                value={duration} onChange={(val) => setDuration(val)}
-                addonAfter={t('expand.seconds')} style={{ width: 180 }}
-              />
-              <Text type="secondary">{t('expand.positiveInteger')}</Text>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Space>
+                <Text type="secondary">{t('expand.duration')}</Text>
+                <InputNumber min={1} max={120} step={1} precision={0}
+                  value={duration} onChange={(val) => setDuration(val)}
+                  addonAfter={t('expand.seconds')} style={{ width: 160 }}
+                />
+              </Space>
+              <Space>
+                <Text type="secondary">{t('expand.segmentDuration')}</Text>
+                <InputNumber min={1} max={120} step={1} precision={0}
+                  value={segmentDuration ?? duration} onChange={handleSegmentChange}
+                  addonAfter={t('expand.seconds')} style={{ width: 160 }}
+                />
+                <Tooltip title={t('expand.segmentHint')}>
+                  <Text type="secondary" style={{ cursor: 'help' }}>{t('expand.segmentAuto')}</Text>
+                </Tooltip>
+              </Space>
             </Space>
           </Card>
 
@@ -737,29 +794,55 @@ const ExpandPage: React.FC = () => {
       </Row>
 
       {/* (5) Output Area */}
-      <Card title={t('expand.result')} style={{ marginTop: 16 }}
-        extra={result ? (
-          <Button icon={<CopyOutlined />} onClick={handleCopy}
-            type={copied ? 'primary' : 'default'}>
-            {copied ? t('expand.copied') : t('common.copy')}
-          </Button>
-        ) : null}
-      >
-        {result ? (
-          <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit',
-            background: '#f6f8fa', padding: 20, borderRadius: 8,
-            maxHeight: 600, overflow: 'auto', lineHeight: 1.8,
-            fontSize: 14, minHeight: 200 }}>
-            {result}
-          </pre>
-        ) : (
-          <div style={{ minHeight: 200, display: 'flex', alignItems: 'center',
-            justifyContent: 'center', color: '#bbb', fontSize: 14,
-            background: '#fafafa', borderRadius: 8 }}>
-            {t('expand.emptyResult')}
-          </div>
-        )}
-      </Card>
+      {segments.length > 0 ? (
+        <Card title={t('expand.result')} style={{ marginTop: 16 }}
+          extra={
+            <Button icon={<CopyOutlined />} type={copiedAll ? 'primary' : 'default'} onClick={copyAllSegments}>
+              {copiedAll ? t('expand.copied') : t('expand.copyAll')}
+            </Button>
+          }
+        >
+          {segments.map((seg) => (
+            <Card key={seg.index} size="small" style={{ marginTop: 12 }}
+              title={`${t('expand.segment')} ${seg.index}`}
+              extra={
+                <Space>
+                  <Tag color="blue">{seg.duration} {t('expand.seconds')}</Tag>
+                  <Button size="small" icon={<CopyOutlined />} onClick={() => copySegment(seg.content)}>
+                    {t('common.copy')}
+                  </Button>
+                </Space>
+              }
+            >
+              <TextArea readOnly autoSize={{ minRows: 6, maxRows: 12 }} value={seg.content} />
+            </Card>
+          ))}
+        </Card>
+      ) : (
+        <Card title={t('expand.result')} style={{ marginTop: 16 }}
+          extra={result ? (
+            <Button icon={<CopyOutlined />} onClick={handleCopy}
+              type={copied ? 'primary' : 'default'}>
+              {copied ? t('expand.copied') : t('common.copy')}
+            </Button>
+          ) : null}
+        >
+          {result ? (
+            <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit',
+              background: '#f6f8fa', padding: 20, borderRadius: 8,
+              maxHeight: 600, overflow: 'auto', lineHeight: 1.8,
+              fontSize: 14, minHeight: 200 }}>
+              {result}
+            </pre>
+          ) : (
+            <div style={{ minHeight: 200, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', color: '#bbb', fontSize: 14,
+              background: '#fafafa', borderRadius: 8 }}>
+              {t('expand.emptyResult')}
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   )
 }

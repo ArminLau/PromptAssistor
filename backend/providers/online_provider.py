@@ -62,7 +62,7 @@ class OnlineProvider(BaseProvider):
             self._client = AsyncOpenAI(
                 api_key=config.api_key or "not-needed",  # Some local APIs don't require a key
                 base_url=config.api_base,
-                timeout=120.0,  # 2 minute timeout for long generations
+                timeout=None,  # 不设超时（模型响应可能很慢）/ no timeout (model responses may be slow)
             )
 
             self._set_initialized(True)

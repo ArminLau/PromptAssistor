@@ -42,9 +42,17 @@ export interface PromptItem {
   updated_at: string
 }
 
+// 分段结果项 / multi-segment result item
+export interface SegmentResult {
+  index: number      // 分段序号（从 1 起）/ segment index (1-based)
+  duration: number   // 该段视频时长（秒）/ this segment's video duration (seconds)
+  content: string    // 该段完整提示词 / this segment's full prompt
+}
+
 export interface GenerateResult {
   success: boolean
   result?: string
+  segments?: SegmentResult[]  // 多段结果（仅 minimax_h3 分段时返回）/ multi-segment results
   error?: string
   model_name?: string
   tokens_used?: number
@@ -162,6 +170,7 @@ export const expandApi = {
     model_type?: string      // 模型类型: krea2 | z-image | flux | qwen-image | anima | sdxl
     short_prompt: string
     target_duration?: number
+    segment_duration?: number | null  // 分段时长(秒)，null=不拆分 / segment duration (seconds)
     generation_mode?: string
     visual_style?: string
     expansion_style?: string
@@ -170,7 +179,8 @@ export const expandApi = {
     extra_context?: string
     images?: string[]  // base64 data URLs / 参考图片的base64数据URL
   }) =>
-    api.post<GenerateResult>('/expand', data, { timeout: 180000 }),
+    // timeout: 0 = 不设超时（模型响应可能很慢，不做限制）/ no timeout (model responses may be slow)
+    api.post<GenerateResult>('/expand', data, { timeout: 0 }),
 }
 
 // 读取 NDJSON 流并逐行回调 / Read an NDJSON stream and call onLine per line

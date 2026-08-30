@@ -4,7 +4,9 @@ F2: Prompt Expansion API routes / 提示词扩写 API 路由。
 
 import base64
 import logging
+import math
 import mimetypes
+import re
 import tempfile
 from pathlib import Path
 
@@ -43,6 +45,39 @@ MODEL_TYPE_LABELS: dict[str, str] = {
     "sdxl": "SDXL",
 }
 
+# 分段标记正则：匹配「【分段 N · X秒】」/ Segment marker regex: matches 【分段 N · X秒】
+# 全角括号避免与 skill 中半角 [Shot N] 冲突 / Full-width brackets avoid colliding with [Shot N]
+_SEGMENT_RE = re.compile(r"【\s*分段\s*(\d+)\s*[·|:：,，\-—]\s*(\d+(?:\.\d+)?)\s*秒\s*】")
+
+
+def _parse_segments(text: str) -> list[dict] | None:
+    """解析多段标记，返回 [{index, duration, content}]；不足 2 段返回 None。
+    / Parse segment markers into [{index, duration, content}]; return None if fewer than 2.
+
+    Args:
+        text: 模型输出的多段提示词文本 / the model's multi-segment output text.
+
+    Returns:
+        分段列表（index 从 1 起、duration 为数字、content 为去空白后的提示词），
+        或 None 表示未能识别出多段 / segment list, or None if multi-segment not detected.
+    """
+    matches = list(_SEGMENT_RE.finditer(text))
+    if len(matches) < 2:
+        return None
+
+    segments: list[dict] = []
+    for i, m in enumerate(matches):
+        # 每段内容 = 本标记之后到下一个标记之前（末段到文本结尾）
+        # / segment content = between this marker and the next marker (or end of text)
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        dur = float(m.group(2))
+        segments.append({
+            "index": i + 1,
+            "duration": int(dur) if dur.is_integer() else round(dur, 1),
+            "content": text[m.end():end].strip(),
+        })
+    return segments
+
 
 class ExpandRequest(BaseModel):
     """Expand request / 扩写请求。
@@ -57,6 +92,7 @@ class ExpandRequest(BaseModel):
     model_type: str = ""  # 模型类型（natural_language/danbooru 用）/ model type
     short_prompt: str  # user's requirement description / 用户需求描述
     target_duration: int = 5  # target duration in seconds / 目标时长(秒)
+    segment_duration: int | None = None  # 分段时长(秒)，None=不拆分 / segment duration (seconds), None = no split
     generation_mode: str = "T2VA"  # H3 generation mode / H3生成模式
     visual_style: str = ""  # visual style keywords / 视觉风格关键词
     expansion_style: str = ""
@@ -150,6 +186,11 @@ async def expand_prompt(request: Request, body: ExpandRequest):
             f"Analyze the actual content of the images and keep the output strongly related to them."
         )
 
+    # 分段标志与最少分段数（供后续 max_tokens 与结果解析使用）
+    # / multi-segment flag and min segment count (used later for max_tokens and parsing)
+    is_multi_segment = False
+    min_segments = 0
+
     # 按扩写类型分支构建专用上下文 / Build type-specific context
     if body.expansion_type == "minimax_h3":
         # 生成模式 / Generation mode
@@ -171,6 +212,26 @@ async def expand_prompt(request: Request, body: ExpandRequest):
         # 时长 / Duration
         if body.target_duration:
             extra_parts.append(f"目标视频时长 / Target duration: {body.target_duration} 秒/seconds")
+
+        # 分段 / Multi-segment — 目标时长超过分段时长时拆分
+        # / Split when target duration exceeds segment duration
+        if body.segment_duration and body.target_duration > body.segment_duration:
+            min_segments = math.ceil(body.target_duration / body.segment_duration)
+            is_multi_segment = True
+            extra_parts.append(
+                f"*** 分段生成要求 / Multi-segment requirement ***\n"
+                f"目标总时长 {body.target_duration} 秒需拆分为多个连续片段：每个片段时长 ≤ "
+                f"{body.segment_duration} 秒，片段总数至少 {min_segments} 段（可多于该数量以保证连贯性），"
+                f"所有片段时长之和 = {body.target_duration} 秒，各片段时长可不等。\n"
+                f"每个片段必须是一个可独立运行的完整 {body.generation_mode} 提示词，"
+                f"严格遵循上述 Skill 指南的输出格式，其内部时间线一律从 00:00 开始"
+                f"（不要累计前一段的结束时间）。\n"
+                f"请根据画面连贯性合理分配分镜：相邻片段之间保持主体、风格、光线、动作的连续性，"
+                f"使各段视频按序号无缝拼接。\n"
+                f"输出时严格用以下格式分隔每个片段（片段之间不要输出任何额外说明文字）：\n"
+                f"【分段 1 · X秒】\n<该片段的完整提示词>\n【分段 2 · X秒】\n<该片段的完整提示词>\n"
+                f"…依次类推，直到时长累加至 {body.target_duration} 秒"
+            )
 
     elif body.expansion_type in ("natural_language", "danbooru"):
         # 目标模型 / Target model
@@ -207,6 +268,9 @@ async def expand_prompt(request: Request, body: ExpandRequest):
         if body.target_length:
             # 提高 max_tokens，避免长目标被截断 / raise max_tokens to avoid truncation
             gen_kwargs["max_tokens"] = max(4096, min(body.target_length * 2 + 512, 16384))
+        if is_multi_segment:
+            # 多段输出更长，提高 max_tokens 避免截断 / raise max_tokens for longer multi-segment output
+            gen_kwargs["max_tokens"] = max(4096, min(16384, min_segments * 1500))
 
         result = await engine.generate(
             feature="expand",
@@ -216,12 +280,18 @@ async def expand_prompt(request: Request, body: ExpandRequest):
             extra_context=extra,
             **gen_kwargs,
         )
-        return {
+
+        # 解析多段结果 / parse multi-segment result (回退为单段 if parse fails)
+        segments = _parse_segments(result.text) if is_multi_segment else None
+        resp: dict = {
             "success": True,
             "result": result.text,
             "model_name": result.model_name,
             "tokens_used": result.tokens_used,
         }
+        if segments:
+            resp["segments"] = segments
+        return resp
     except Exception as e:
         logger.error(f"Expand prompt failed / 扩写失败: {e}")
         return {"success": False, "error": str(e)}

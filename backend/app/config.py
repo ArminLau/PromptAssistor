@@ -64,7 +64,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "features": {
         "reverse": {"active_model": ""},
-        "expand": {"active_model": ""},
+        # 分段时长(秒)，None 表示跟随目标时长 / segment duration in seconds, None = follow target
+        "expand": {"active_model": "", "segment_duration": None},
         "batch": {"active_model": ""},
     },
 }

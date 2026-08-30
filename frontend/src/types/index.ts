@@ -52,9 +52,17 @@ export interface PromptItem {
 export interface GenerateResult {
   success: boolean
   result?: string
+  segments?: SegmentResult[]  // 多段结果（仅 minimax_h3 分段时返回）/ multi-segment results
   error?: string
   model_name?: string
   tokens_used?: number
+}
+
+// 分段结果项 / multi-segment result item
+export interface SegmentResult {
+  index: number      // 分段序号（从 1 起）/ segment index (1-based)
+  duration: number   // 该段视频时长（秒）/ this segment's video duration (seconds)
+  content: string    // 该段完整提示词 / this segment's full prompt
 }
 
 // Batch task
