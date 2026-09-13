@@ -137,6 +137,8 @@ class Dataset(Base):
     target_length = Column(Integer, nullable=False, default=500)
     reverse_style = Column(String(50), nullable=False, default="five_point")
     output_language = Column(String(10), nullable=False, default="zh")
+    # 反推需求描述（优先级最高）/ reverse requirement description (highest priority)
+    reverse_requirement = Column(Text, nullable=False, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -149,8 +151,49 @@ class Dataset(Base):
             "target_length": self.target_length,
             "reverse_style": self.reverse_style,
             "output_language": self.output_language,
+            "reverse_requirement": self.reverse_requirement,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class LabelTag(Base):
+    """
+    参考标签 / Reference label tag.
+
+    A tag in the F6 reference-tag library. The category hierarchy is an
+    arbitrary-depth tree of folders under the labels directory (first-level:
+    自然语言 / Danbooru标签); a tag is a leaf located in some folder. The DB is
+    the source of truth for a tag's name/content/note (fast loading); a same-name
+    .txt file is kept in sync on disk so a same-name preview image can sit
+    alongside it in the category folder.
+    / 参考标签库中的标签。分类层级是 labels 目录下的任意深度文件夹树（一级：自然语言/Danbooru标签）；
+    标签是位于某文件夹下的叶子。数据库是标签 名称/内容/备注 的唯一事实源（加载快）；同时在磁盘上
+    同步一份同名 .txt，以便同名预览图能存在于分类文件夹中。
+    """
+
+    __tablename__ = "label_tags"
+    __table_args__ = (
+        UniqueConstraint("path", "name", name="uq_label_tag"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # 父分类相对路径（以 / 分隔，如 "自然语言/人物/发型"）/ parent category path
+    path = Column(String(500), nullable=False, default="")
+    name = Column(String(200), nullable=False)             # 标签名 = 文件名 stem / tag name
+    content = Column(Text, nullable=False, default="")     # 内容（模型参考）/ content
+    note = Column(Text, nullable=False, default="")        # 备注 / note
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self) -> dict:
+        """Convert model to dictionary for API response."""
+        return {
+            "id": self.id,
+            "path": self.path,
+            "name": self.name,
+            "content": self.content,
+            "note": self.note,
         }
 
 

@@ -42,6 +42,16 @@ class FilenamesBody(BaseModel):
     filenames: list[str]
 
 
+class BatchTagBody(BaseModel):
+    """批量打标请求体 / Batch-tag request body.
+
+    `all=True` 时忽略 `filenames`，改为对数据集内全部图片打标。
+    / When `all=True`, `filenames` is ignored and all images in the dataset are tagged.
+    """
+    filenames: list[str] = []
+    all: bool = False
+
+
 # ─── Dataset list & CRUD / 数据集列表与增删改 ───────────────────────────────
 
 @router.get("/datasets")
@@ -160,14 +170,21 @@ async def tag_single_item(request: Request, name: str, filename: str):
 
 
 @router.post("/datasets/{name}/tag")
-async def batch_tag_items(request: Request, name: str, body: FilenamesBody):
+async def batch_tag_items(request: Request, name: str, body: BatchTagBody):
     """对选中的多张图片批量打标（流式 NDJSON 逐图返回）/ Batch-tag selected images (streaming NDJSON).
 
-    不区分是否已打标，选中的图片都会重新打标覆盖。
-    / Re-tags all selected images regardless of existing tags.
+    不区分是否已打标，选中的图片都会重新打标覆盖；`all=True` 时打标数据集内全部图片。
+    / Re-tags all selected images regardless of existing tags; tags every image
+    in the dataset when `all=True`.
     """
     engine = PromptEngine(request.app.state.skill_manager, request.app.state.model_manager)
-    filenames = body.filenames
+    if body.all:
+        try:
+            filenames = dm.list_all_filenames(name)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    else:
+        filenames = body.filenames
 
     async def stream_results():
         """逐图打标并即时产出结果 / Tag each image and yield its result as soon as it's ready."""

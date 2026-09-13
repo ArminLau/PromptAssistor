@@ -11,18 +11,17 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Button, Card, Checkbox, Col, Empty, Image, Input, message, Modal, Pagination, Row, Spin, Tooltip, Typography,
+  Button, Card, Checkbox, Col, Empty, Image, Input, InputNumber, message, Modal, Pagination, Row, Spin, Tooltip, Typography,
 } from 'antd'
 import {
   ArrowLeftOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
-import { batchApi, type DatasetItem } from '../services/api'
+import { batchApi, type DatasetItem, type TagResultItem } from '../services/api'
 import ReverseConfigFields from '../components/ReverseConfigFields'
 import { DEFAULT_REVERSE_CONFIG, type ReverseConfig } from '../constants/reverseOptions'
 import { useI18n } from '../i18n'
 
 const { Title, Text } = Typography
-const PAGE_SIZE = 12
 
 interface Props {
   datasetName: string
@@ -37,28 +36,32 @@ const DatasetDetailView: React.FC<Props> = ({ datasetName }) => {
   const [items, setItems] = useState<DatasetItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(12)
   const [loading, setLoading] = useState(false)
   const [adding, setAdding] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [tagging, setTagging] = useState<Set<string>>(new Set())
   const [batchTagging, setBatchTagging] = useState(false)
+  const [confirmTagAll, setConfirmTagAll] = useState(false)
   const [deleteFilenames, setDeleteFilenames] = useState<string[] | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const loadDetail = async (p: number) => {
+  const loadDetail = async (p: number, size: number = pageSize) => {
     setLoading(true)
     try {
-      const res = await batchApi.getDataset(datasetName, p, PAGE_SIZE)
+      const res = await batchApi.getDataset(datasetName, p, size)
       const d = res.data
       setConfig({
         reverseTarget: d.config.reverse_target,
         targetLength: d.config.target_length,
         reverseStyle: d.config.reverse_style,
         outputLanguage: d.config.output_language,
+        requirement: d.config.reverse_requirement ?? '',
       })
       setItems(d.items)
       setTotal(d.total)
       setPage(d.page)
+      setPageSize(size)
     } catch (e: any) {
       message.error(e.response?.data?.detail || t('batch.loadFailed'))
     } finally {
@@ -78,6 +81,11 @@ const DatasetDetailView: React.FC<Props> = ({ datasetName }) => {
     loadDetail(p)
   }
 
+  const handlePageSizeChange = (size: number) => {
+    setPage(1)
+    loadDetail(1, size)
+  }
+
   // ─── 配置 / config ──────────────────────────────────────────────
   const handleConfigChange = (next: ReverseConfig) => {
     setConfig(next)
@@ -87,6 +95,7 @@ const DatasetDetailView: React.FC<Props> = ({ datasetName }) => {
         target_length: next.targetLength ?? 500,
         reverse_style: next.reverseStyle,
         output_language: next.outputLanguage,
+        reverse_requirement: next.requirement ?? '',
       })
       .catch(() => message.error(t('batch.saveConfigFailed')))
   }
@@ -140,7 +149,7 @@ const DatasetDetailView: React.FC<Props> = ({ datasetName }) => {
       }
       setSelected(new Set())
       const newTotal = Math.max(0, total - deleted.length)
-      const newPage = Math.max(1, Math.min(page, Math.ceil(newTotal / PAGE_SIZE) || 1))
+      const newPage = Math.max(1, Math.min(page, Math.ceil(newTotal / pageSize) || 1))
       setPage(newPage)
       loadDetail(newPage)
     } catch (e: any) {
@@ -198,33 +207,50 @@ const DatasetDetailView: React.FC<Props> = ({ datasetName }) => {
     }
   }
 
-  const batchTag = async () => {
-    const filenames = Array.from(selected)
-    if (!filenames.length) {
-      message.warning(t('batch.selectFirst'))
-      return
-    }
+  // 流式批量打标（filenames=null 表示打标数据集内全部图片）
+  // / stream batch-tag (filenames=null means tag all images in the dataset)
+  const streamTag = async (filenames: string[] | null) => {
     setBatchTagging(true)
     let done = 0
+    const onResult = (item: TagResultItem) => {
+      if (item.error) {
+        message.error(t('batch.tagFailed') + ' ' + item.filename + ': ' + item.error)
+        return
+      }
+      done += 1
+      setItems((prev) =>
+        prev.map((it) =>
+          it.filename === item.filename && item.result ? { ...it, prompt_text: item.result } : it,
+        ),
+      )
+    }
     try {
-      await batchApi.tagItems(datasetName, filenames, (item) => {
-        if (item.error) {
-          message.error(t('batch.tagFailed') + ' ' + item.filename + ': ' + item.error)
-          return
-        }
-        done += 1
-        setItems((prev) =>
-          prev.map((it) =>
-            it.filename === item.filename && item.result ? { ...it, prompt_text: item.result } : it,
-          ),
-        )
-      })
+      if (filenames === null) {
+        await batchApi.tagAllItems(datasetName, onResult)
+      } else {
+        await batchApi.tagItems(datasetName, filenames, onResult)
+      }
       message.success(t('batch.batchTagDone').replace('{n}', String(done)))
     } catch (e: any) {
       message.error(t('batch.batchTagFailed') + ': ' + (e.message || ''))
     } finally {
       setBatchTagging(false)
     }
+  }
+
+  const batchTag = () => {
+    const filenames = Array.from(selected)
+    if (!filenames.length) {
+      // 未勾选 → 弹框确认是否打标数据集内全部图片 / nothing selected → confirm tag-all
+      if (total > 0) setConfirmTagAll(true)
+      return
+    }
+    streamTag(filenames)
+  }
+
+  const handleTagAllConfirm = () => {
+    setConfirmTagAll(false)
+    streamTag(null)
   }
 
   // ─── 素材卡片 / item card ───────────────────────────────────────
@@ -350,7 +376,7 @@ const DatasetDetailView: React.FC<Props> = ({ datasetName }) => {
               <Button
                 icon={<ThunderboltOutlined />}
                 loading={batchTagging}
-                disabled={selected.size === 0}
+                disabled={total === 0}
                 onClick={batchTag}
               >
                 {t('batch.batchTag')}{selected.size > 0 ? `(${selected.size})` : ''}
@@ -381,16 +407,30 @@ const DatasetDetailView: React.FC<Props> = ({ datasetName }) => {
             )}
           </Spin>
 
-          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
-            <Pagination
-              current={page}
-              pageSize={PAGE_SIZE}
-              total={total}
-              showSizeChanger={false}
-              hideOnSinglePage
-              onChange={handlePageChange}
-            />
-          </div>
+          {total > 0 && (
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <Pagination
+                current={page}
+                pageSize={pageSize}
+                total={total}
+                showSizeChanger
+                pageSizeOptions={[12, 24, 48, 96]}
+                onChange={handlePageChange}
+                onShowSizeChange={(_, size) => handlePageSizeChange(size)}
+              />
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('batch.pageSize')}</Text>
+                <InputNumber
+                  min={1}
+                  max={500}
+                  precision={0}
+                  value={pageSize}
+                  onChange={(v) => { if (v && v >= 1) handlePageSizeChange(v) }}
+                  style={{ width: 80 }}
+                />
+              </span>
+            </div>
+          )}
         </Col>
       </Row>
 
@@ -408,6 +448,19 @@ const DatasetDetailView: React.FC<Props> = ({ datasetName }) => {
         onCancel={() => setDeleteFilenames(null)}
       >
         <p>{t('batch.deleteItemConfirmContent')}</p>
+      </Modal>
+
+      {/* 批量打标全部确认弹窗 / Tag-all confirmation modal */}
+      <Modal
+        title={t('batch.tagAllConfirmTitle')}
+        open={confirmTagAll}
+        okText={t('batch.batchTag')}
+        cancelText={t('common.cancel')}
+        confirmLoading={batchTagging}
+        onOk={handleTagAllConfirm}
+        onCancel={() => setConfirmTagAll(false)}
+      >
+        <p>{t('batch.tagAllConfirmContent').replace('{n}', String(total))}</p>
       </Modal>
     </div>
   )

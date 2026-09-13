@@ -232,11 +232,14 @@ class PromptEngine:
         # 完全参考模式（无 skill）/ reference-only mode (no skill)
         if feature == "reverse_reference":
             return REVERSE_REFERENCE_SYSTEM_TEMPLATE.format(extra_context=extra_context)
+        if feature == "generate_reference":
+            return GENERATE_REFERENCE_SYSTEM_TEMPLATE.format(extra_context=extra_context)
 
         templates = {
             "reverse": REVERSE_SYSTEM_TEMPLATE,
             "expand": EXPAND_SYSTEM_TEMPLATE,
             "batch": BATCH_SYSTEM_TEMPLATE,
+            "generate": GENERATE_SYSTEM_TEMPLATE,
         }
 
         template = templates.get(feature, DEFAULT_SYSTEM_TEMPLATE)
@@ -269,6 +272,17 @@ class PromptEngine:
             base = f"请将以下简短提示词扩展为详细、专业的提示词：\n\n{user_text}"
         elif feature == "batch":
             base = f"请为以下内容生成标签和提示词：\n\n{user_text}"
+        elif feature == "generate":
+            # 生成（有 skill）：需求描述优先级最高，参考标签作为素材融入
+            # / generate (with skill): requirement highest priority, reference tags as material
+            base = "请根据以下参考标签与需求描述，生成一条完整的专业提示词。"
+            if user_text.strip():
+                base += f"\n\n{user_text}"
+        elif feature == "generate_reference":
+            # 完全参考模式：需求描述是唯一依据 / reference-only: requirement is the sole guide
+            base = "请严格遵循以下参考标签与需求描述，生成一条符合要求的提示词。"
+            if user_text.strip():
+                base += f"\n\n{user_text}"
         else:
             base = user_text
 
@@ -340,6 +354,34 @@ BATCH_SYSTEM_TEMPLATE = """你是一位专业的提示词工程专家，擅长�
 - tags: 标签列表
 - prompt: 生成的提示词
 - category: 分类
+{extra_context}"""
+
+GENERATE_SYSTEM_TEMPLATE = """你是一位专业的提示词工程专家，擅长根据参考标签与需求描述生成高质量提示词。
+
+## 目标模型 Skill 指南
+以下是目标生成模型 **{skill_name}** 的提示词编写指南，你必须严格遵循这些规范来编写提示词：
+
+{skill_content}
+
+## 任务
+根据用户提供的参考标签（可作为素材/要素融入）与需求描述，生成一条完整的专业提示词。
+
+## 输出要求
+1. 提示词必须符合上述 Skill 指南中的结构和规范
+2. 将参考标签中的要素自然融入提示词，同时遵循需求描述
+3. 若用户提供需求描述，其优先级最高，与 Skill 指南冲突时以需求为准
+4. 输出格式整洁，仅输出提示词，不要包含解释性文字
+{extra_context}"""
+
+GENERATE_REFERENCE_SYSTEM_TEMPLATE = """你是一位专业的提示词工程专家，擅长根据参考标签与需求描述生成提示词。
+
+## 任务
+根据用户提供的参考标签与需求描述，生成一条符合要求的提示词。
+
+## 输出要求
+1. 完全遵循用户需求描述（唯一依据，优先级最高），不套用任何特定模型的预设规范
+2. 将参考标签中的要素自然融入提示词
+3. 输出格式整洁，仅输出提示词，不要包含解释性文字
 {extra_context}"""
 
 DEFAULT_SYSTEM_TEMPLATE = """你是专业的提示词工程专家。

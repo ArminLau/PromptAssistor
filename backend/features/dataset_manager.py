@@ -285,6 +285,7 @@ def get_dataset_detail(db: Session, name: str, page: int = 1, page_size: int = 1
             "target_length": dataset.target_length,
             "reverse_style": dataset.reverse_style,
             "output_language": dataset.output_language,
+            "reverse_requirement": dataset.reverse_requirement,
         },
         "total": total,
         "page": page,
@@ -310,6 +311,8 @@ def update_dataset_config(db: Session, name: str, config: dict) -> dict:
         dataset.reverse_style = config["reverse_style"]
     if "output_language" in config:
         dataset.output_language = config["output_language"]
+    if "reverse_requirement" in config:
+        dataset.reverse_requirement = config["reverse_requirement"]
 
     db.commit()
     return {
@@ -319,6 +322,7 @@ def update_dataset_config(db: Session, name: str, config: dict) -> dict:
             "target_length": dataset.target_length,
             "reverse_style": dataset.reverse_style,
             "output_language": dataset.output_language,
+            "reverse_requirement": dataset.reverse_requirement,
         },
     }
 
@@ -444,7 +448,7 @@ async def tag_image(engine, db: Session, name: str, filename: str) -> dict:
     result = await engine.generate(
         feature=feature,
         skill_name=skill,
-        user_text="",
+        user_text=dataset.reverse_requirement,
         images=[str(img)],
         extra_context=extra,
     )
@@ -457,6 +461,24 @@ async def tag_image(engine, db: Session, name: str, filename: str) -> dict:
         "prompt_text": text,
         "model_name": result.model_name,
     }
+
+
+def list_all_filenames(name: str) -> list[str]:
+    """列出数据集内全部图片文件名（排序）/ List all image filenames in a dataset (sorted).
+
+    Args:
+        name: 数据集名称 / dataset name.
+
+    Returns:
+        排序后的图片文件名列表 / sorted image filename list.
+
+    Raises:
+        ValueError: 数据集不存在 / dataset does not exist.
+    """
+    folder = _dataset_folder(name)
+    if not folder.is_dir():
+        raise ValueError(f"数据集不存在 / Dataset does not exist: {name}")
+    return [p.name for p in _list_image_files(folder)]
 
 
 def resolve_image_path(name: str, filename: str) -> Path | None:

@@ -31,6 +31,7 @@ if IS_FROZEN:
     DEFAULT_MODELS_DIR = Path(os.environ.get("PROMPTASSISTOR_MODELS_DIR", str(_EXE_DIR / "models")))
     DEFAULT_OUTPUT_DIR = _EXE_DIR / "output"
     DEFAULT_DATASETS_DIR = _EXE_DIR / "datasets"
+    DEFAULT_LABELS_DIR = _EXE_DIR / "labels"
 
     # Static files are embedded / 静态文件嵌入在exe中
     DEFAULT_STATIC_DIR = Path(os.environ.get("PROMPTASSISTOR_STATIC_DIR", str(_MEIPASS / "static")))
@@ -60,6 +61,9 @@ else:
     # Default datasets directory (dataset batch tagging) / 默认数据集目录（批量打标）
     DEFAULT_DATASETS_DIR = PROJECT_ROOT / "datasets"
 
+    # Default labels directory (reference tag library) / 默认标签目录（参考标签库）
+    DEFAULT_LABELS_DIR = PROJECT_ROOT / "labels"
+
     # Static files directory (frontend build output)
     DEFAULT_STATIC_DIR = BACKEND_ROOT / "static"
 
@@ -86,6 +90,7 @@ SKILLS_DIR: Path = DEFAULT_SKILLS_DIR
 MODELS_DIR: Path = DEFAULT_MODELS_DIR
 OUTPUT_DIR: Path = DEFAULT_OUTPUT_DIR
 DATASETS_DIR: Path = DEFAULT_DATASETS_DIR
+LABELS_DIR: Path = DEFAULT_LABELS_DIR
 
 
 def is_workspace_enabled() -> bool:

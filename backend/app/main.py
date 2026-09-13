@@ -75,6 +75,26 @@ async def lifespan(app: FastAPI):
     from db.database import init_db
     init_db()
 
+    # 3.5 启动时扫描 labels 目录，将 txt 标签文件同步到数据库
+    # / On startup, scan the labels dir and sync txt tag files into the DB
+    try:
+        from db.database import get_session
+        from features import labels_manager as labels_mgr
+
+        db = get_session()
+        try:
+            sync_result = labels_mgr.sync_tags_from_disk(db)
+            if sync_result.get("scanned"):
+                logger.info(
+                    f"Labels synced from disk / 标签已从磁盘同步: "
+                    f"{sync_result['scanned']} files, "
+                    f"{sync_result['created']} created, {sync_result['updated']} updated"
+                )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Label sync skipped / 标签同步跳过: {e}")
+
     # 4. Initialize managers / 初始化管理器
     from core.skill_manager import SkillManager
     from core.model_manager import ModelManager

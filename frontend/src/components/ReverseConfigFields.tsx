@@ -9,7 +9,7 @@
  */
 
 import React from 'react'
-import { Card, InputNumber, Select, Typography } from 'antd'
+import { Card, Input, InputNumber, Select, Typography } from 'antd'
 import {
   getOutputLanguages,
   getReverseStyles,
@@ -80,6 +80,17 @@ const ReverseConfigFields: React.FC<Props> = ({ value, onChange }) => {
           onChange={(v) => patch({ outputLanguage: v })}
           style={{ width: '100%' }}
           options={getOutputLanguages(language)}
+        />
+      </Card>
+
+      <Card title={t('reverse.requirements')} size="small">
+        <Input.TextArea
+          rows={3}
+          placeholder={t('reverse.requirementsPlaceholder')}
+          value={value.requirement}
+          onChange={(e) => patch({ requirement: e.target.value })}
+          maxLength={2000}
+          showCount
         />
       </Card>
     </div>

@@ -15,6 +15,7 @@ import {
   ToolOutlined,
   SettingOutlined,
   GlobalOutlined,
+  FileAddOutlined,
 } from '@ant-design/icons'
 import DebugConsole from './DebugConsole'
 import { useI18n } from '../i18n'
@@ -24,7 +25,7 @@ const { Sider, Content, Footer, Header } = AntLayout
 
 // 路由键列表（用于菜单高亮，不含翻译文本）
 // / Route keys used for menu highlight (not translated).
-const ROUTE_KEYS = ['/reverse', '/expand', '/batch', '/library', '/skills', '/settings']
+const ROUTE_KEYS = ['/generate', '/reverse', '/expand', '/batch', '/library', '/skills', '/settings']
 
 // 根据当前路径计算高亮菜单键（支持 /batch/:datasetName 等子路由）
 // / Compute the highlighted menu key from the current path (supports sub-routes like /batch/:datasetName)
@@ -44,6 +45,7 @@ const AppLayout: React.FC<LayoutProps> = ({ children }) => {
   const setLanguage = useAppStore((s) => s.setLanguage)
 
   const menuItems: MenuProps['items'] = [
+    { key: '/generate', icon: <FileAddOutlined />, label: t('nav.generate') },
     { key: '/reverse', icon: <ScanOutlined />, label: t('nav.reverse') },
     { key: '/expand', icon: <ExpandOutlined />, label: t('nav.expand') },
     { key: '/batch', icon: <AppstoreOutlined />, label: t('nav.batch') },

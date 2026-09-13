@@ -99,12 +99,20 @@ class WorkspaceManager:
         else:
             consts.DATASETS_DIR = ws_path / "datasets"
 
+        # Resolve labels directory / 解析Labels目录
+        labels_override = workspace_config.get("labels_dir", "")
+        if labels_override:
+            consts.LABELS_DIR = Path(labels_override).expanduser().resolve()
+        else:
+            consts.LABELS_DIR = ws_path / "labels"
+
         # Ensure all directories exist / 确保所有目录存在
         for d, name in [
             (consts.SKILLS_DIR, "skills"),
             (consts.MODELS_DIR, "models"),
             (consts.OUTPUT_DIR, "output"),
             (consts.DATASETS_DIR, "datasets"),
+            (consts.LABELS_DIR, "labels"),
         ]:
             d.mkdir(parents=True, exist_ok=True)
 
@@ -113,7 +121,8 @@ class WorkspaceManager:
             f"  skills → {consts.SKILLS_DIR}\n"
             f"  models → {consts.MODELS_DIR}\n"
             f"  output → {consts.OUTPUT_DIR}\n"
-            f"  datasets → {consts.DATASETS_DIR}"
+            f"  datasets → {consts.DATASETS_DIR}\n"
+            f"  labels → {consts.LABELS_DIR}"
         )
 
         return {
@@ -123,6 +132,7 @@ class WorkspaceManager:
             "models_dir": str(consts.MODELS_DIR),
             "output_dir": str(consts.OUTPUT_DIR),
             "datasets_dir": str(consts.DATASETS_DIR),
+            "labels_dir": str(consts.LABELS_DIR),
         }
 
     def get_workspace_info(self) -> dict[str, Any]:
@@ -135,4 +145,5 @@ class WorkspaceManager:
             "effective_models_dir": str(consts.MODELS_DIR),
             "effective_output_dir": str(consts.OUTPUT_DIR),
             "effective_datasets_dir": str(consts.DATASETS_DIR),
+            "effective_labels_dir": str(consts.LABELS_DIR),
         }

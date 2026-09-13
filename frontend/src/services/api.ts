@@ -80,6 +80,7 @@ export interface DatasetConfig {
   target_length: number
   reverse_style: string
   output_language: string
+  reverse_requirement: string
 }
 
 export interface DatasetItem {
@@ -102,6 +103,23 @@ export interface TagResultItem {
   result?: string
   error?: string
   model_name?: string
+}
+
+// ─── 参考标签库 / Reference tag library types ──────────────────────────────
+
+export interface LabelTag {
+  name: string
+  content: string
+  note: string
+  has_preview: boolean
+}
+
+/** 标签树节点（任意深度分类，标签为叶子）/ Label tree node (arbitrary-depth category, tags are leaves) */
+export interface LabelNode {
+  name: string       // 分类名 / category name
+  path: string       // 完整相对路径，如 "自然语言/人物/发型" / full relative path
+  children: LabelNode[]
+  tags: LabelTag[]
 }
 
 // ─── Model API ────────────────────────────────────────────────────────────
@@ -219,6 +237,23 @@ async function fetchNdjsonStream(
   if (buffer.trim()) handleLine(buffer)
 }
 
+// 批量打标流式请求 / Batch-tag streaming request helper
+async function postTagStream(
+  name: string,
+  body: { filenames?: string[]; all?: boolean },
+  onResult: (item: TagResultItem) => void,
+): Promise<void> {
+  await fetchNdjsonStream(
+    `${API_BASE_URL}/batch/datasets/${encodeURIComponent(name)}/tag`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    (item) => onResult(item as TagResultItem),
+  )
+}
+
 export const batchApi = {
   // ─── 数据集 CRUD / dataset CRUD ────────────────────────────────
   listDatasets: (search?: string) =>
@@ -275,21 +310,66 @@ export const batchApi = {
     name: string,
     filenames: string[],
     onResult: (item: TagResultItem) => void,
-  ): Promise<void> => {
-    await fetchNdjsonStream(
-      `${API_BASE_URL}/batch/datasets/${encodeURIComponent(name)}/tag`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filenames }),
-      },
-      (item) => onResult(item as TagResultItem),
-    )
-  },
+  ): Promise<void> => postTagStream(name, { filenames }, onResult),
+  /** 流式批量打标数据集全部素材 / Stream batch-tag of all items in a dataset */
+  tagAllItems: async (
+    name: string,
+    onResult: (item: TagResultItem) => void,
+  ): Promise<void> => postTagStream(name, { all: true }, onResult),
 
   // ─── 图片 URL / image URL ─────────────────────────────────────
   imageUrl: (name: string, filename: string) =>
     `${API_BASE_URL}/batch/datasets/${encodeURIComponent(name)}/files/${encodeURIComponent(filename)}`,
+}
+
+// ─── Prompt Generation API / 提示词生成 API ────────────────────────────────
+
+export const generateApi = {
+  generate: (data: {
+    target: string
+    target_length?: number
+    style?: string
+    output_language?: string
+    requirement?: string
+    tags?: { name: string; content: string }[]
+  }) =>
+    // timeout: 0 = 不设超时（模型响应可能很慢，不做限制）/ no timeout (model responses may be slow)
+    api.post<GenerateResult>('/generate', data, { timeout: 0 }),
+}
+
+// ─── Labels API / 参考标签库 API ───────────────────────────────────────────
+
+export const labelsApi = {
+  /** 获取标签库完整树 / Fetch the full label library tree */
+  tree: () => api.get<{ success: boolean; tree: LabelNode[] }>('/labels/tree'),
+
+  createCategory: (parentPath: string, name: string) =>
+    api.post<{ success: boolean }>('/labels/categories', { parent_path: parentPath, name }),
+  renameCategory: (path: string, newName: string) =>
+    api.put<{ success: boolean }>('/labels/categories', { path, new_name: newName }),
+  deleteCategory: (path: string) =>
+    api.delete<{ success: boolean }>('/labels/categories', { params: { path } }),
+
+  createTag: (data: { path: string; name: string; content: string; note: string }) =>
+    api.post<{ success: boolean; tag: LabelTag }>('/labels/tags', data),
+  updateTag: (
+    path: string,
+    name: string,
+    data: { name?: string; content?: string; note?: string },
+  ) =>
+    api.put<{ success: boolean; tag: LabelTag }>('/labels/tags', {
+      path,
+      name,
+      new_name: data.name,
+      content: data.content,
+      note: data.note,
+    }),
+  deleteTag: (path: string, name: string) =>
+    api.delete<{ success: boolean }>('/labels/tags', { params: { path, name } }),
+
+  /** 预览图 URL / preview image URL */
+  previewUrl: (path: string, name: string) =>
+    `${API_BASE_URL}/labels/files?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`,
 }
 
 // ─── Library API ──────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { useAppStore } from './stores/appStore'
 import { useI18n } from './i18n'
 
 // Lazy load feature pages / 懒加载功能页面
+const GeneratePage = React.lazy(() => import('./pages/GeneratePage'))
 const ReversePage = React.lazy(() => import('./pages/ReversePage'))
 const ExpandPage = React.lazy(() => import('./pages/ExpandPage'))
 const BatchPage = React.lazy(() => import('./pages/BatchPage'))
@@ -40,6 +41,7 @@ const App: React.FC = () => {
         <React.Suspense fallback={<div style={{ padding: 24 }}>{t('common.loading')}</div>}>
           <Routes>
             <Route path="/" element={<Navigate to="/reverse" replace />} />
+            <Route path="/generate" element={<GeneratePage />} />
             <Route path="/reverse" element={<ReversePage />} />
             <Route path="/expand" element={<ExpandPage />} />
             <Route path="/batch" element={<BatchPage />} />

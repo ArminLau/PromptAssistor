@@ -18,12 +18,16 @@ from .batch_api import router as batch_router
 from .library_api import router as library_router
 from .skill_api import router as skill_router
 from .system_api import router as system_router
+from .generate_api import router as generate_router
+from .labels_api import router as labels_router
 
 api_router.include_router(model_router, prefix="/models", tags=["Models"])
 api_router.include_router(config_router, prefix="/config", tags=["Config"])
 api_router.include_router(reverse_router, prefix="/reverse", tags=["Reverse"])
 api_router.include_router(expand_router, prefix="/expand", tags=["Expand"])
 api_router.include_router(batch_router, prefix="/batch", tags=["Batch"])
+api_router.include_router(generate_router, prefix="/generate", tags=["Generate"])
+api_router.include_router(labels_router, prefix="/labels", tags=["Labels"])
 api_router.include_router(library_router, prefix="/library", tags=["Library"])
 api_router.include_router(skill_router, prefix="/skills", tags=["Skills"])
 api_router.include_router(system_router, prefix="/system", tags=["System"])

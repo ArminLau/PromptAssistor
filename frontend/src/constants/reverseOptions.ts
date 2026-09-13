@@ -108,6 +108,7 @@ export interface ReverseConfig {
   targetLength: number | null
   reverseStyle: string
   outputLanguage: string
+  requirement: string
 }
 
 export const DEFAULT_REVERSE_CONFIG: ReverseConfig = {
@@ -115,6 +116,7 @@ export const DEFAULT_REVERSE_CONFIG: ReverseConfig = {
   targetLength: 500,
   reverseStyle: 'five_point',
   outputLanguage: 'zh',
+  requirement: '',
 }
 
 // 解析反推目标值 → { skill, modelType } / parse target value
